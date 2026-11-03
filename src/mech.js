@@ -102,10 +102,12 @@ export class Mech {
     const bob = grounded ? Math.sin(this.t * (8 + sf * 14)) * 0.035 * (0.4 + sf) : 0;
     this.body.position.y = bob - sq * 0.6 + this.airT * 0.35;
     this.body.scale.set(1 + sq * 0.5, 1 - sq, 1 + sq * 0.3);
-    const targetBank = THREE.MathUtils.clamp(-st.vx * 0.045, -0.5, 0.5);
+    const targetBank = THREE.MathUtils.clamp(-st.turn * 0.9, -0.55, 0.55);
     this.bank += (targetBank - this.bank) * Math.min(1, dt * 8);
-    const targetYaw = THREE.MathUtils.clamp(-st.vx * 0.02, -0.35, 0.35);
-    this.yaw += (targetYaw - this.yaw) * Math.min(1, dt * 6);
+    // heading: face the way we move. Keep the previous yaw when nearly stopped.
+    let d = -st.heading - this.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
+    this.yaw += d * Math.min(1, dt * 10);
+    this.root.rotation.order = 'YXZ';
     this.root.rotation.set(st.zip ? 0.15 : grounded ? -sf * 0.08 : THREE.MathUtils.clamp(-st.vy * 0.02, -0.35, 0.3), this.yaw, this.bank + (st.grind ? Math.sin(this.t * 9) * 0.05 : 0));
 
     // rider

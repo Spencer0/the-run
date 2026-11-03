@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { generateLevel, makeRng, CORRIDOR_HALF as W } from './level.js';
+import { generateLevel, makeRng, localUV } from './level.js';
 import { THEMES, SkyDome } from './themes.js';
-import { World, railX, railY, zipY } from './world.js';
+import { World, segLen, segPoint, segParam } from './world.js';
 import { Mech } from './mech.js';
 import { PostFX } from './post.js';
 import { Audio } from './audio.js';
@@ -15,8 +15,9 @@ const store = {
 };
 const isMobile = navigator.maxTouchPoints > 0 && Math.min(window.innerWidth, window.innerHeight) < 900;
 const lerp = (a, b, t) => a + (b - a) * t;
+const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+const headingOf = (vx, vz) => Math.atan2(vx, -vz); // forward = (sin a, -cos a)
 
-// Small burst particles: sparks on rails, bounce puffs, hit debris.
 class Sparks {
   constructor(scene, n = 160) {
     this.n = n; this.i = 0;
@@ -25,11 +26,11 @@ class Sparks {
     this.points = new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffc070, size: 0.35, transparent: true, opacity: 0.95, depthWrite: false, blending: THREE.AdditiveBlending }));
     this.points.frustumCulled = false; scene.add(this.points);
   }
-  emit(x, y, z, count, spread, up, back) {
+  emit(x, y, z, count, spread, up, bx = 0, bz = 0) {
     for (let k = 0; k < count; k++) {
       const i = this.i; this.i = (this.i + 1) % this.n;
       this.pos[i * 3] = x; this.pos[i * 3 + 1] = y; this.pos[i * 3 + 2] = z;
-      this.vel[i * 3] = (Math.random() - 0.5) * spread; this.vel[i * 3 + 1] = Math.random() * up; this.vel[i * 3 + 2] = back + (Math.random() - 0.5) * spread;
+      this.vel[i * 3] = bx + (Math.random() - 0.5) * spread; this.vel[i * 3 + 1] = Math.random() * up; this.vel[i * 3 + 2] = bz + (Math.random() - 0.5) * spread;
       this.life[i] = 0.25 + Math.random() * 0.3;
     }
   }
@@ -74,10 +75,11 @@ class Game {
     this.input.onPause = () => this.togglePause();
     this.input.onMute = () => this.toggleSound();
     this.input.onAny = () => this.audio.unlock();
+    this.input.onStick = (on, x, y, ix, iy) => this.ui.stick(on, x, y, ix, iy);
 
     this.state = 'menu'; this.time = 0; this.clock = new THREE.Clock(); this.worldT = 0;
     this.shake = 0; this.flashAmt = 0; this.flashTint = new THREE.Color(1, 0.25, 0.3);
-    this.camPos = new THREE.Vector3(); this.camLook = new THREE.Vector3(); this.fov = 62;
+    this.camPos = new THREE.Vector3(); this.camLook = new THREE.Vector3(); this.fov = 62; this.camYaw = 0;
     this.bindUI();
     this.applyQuality();
     window.addEventListener('resize', () => this.resize());
@@ -139,7 +141,7 @@ class Game {
     this.audio.stopMusic(); this.audio.setGrind(false);
     this.ui.setHud(false);
     this.ui.renderLevels(THEMES, this.best, (i) => { this.audio.unlock(); this.startLevel(i); });
-    document.getElementById('menu-note').textContent = isMobile ? 'Drag to steer · tap to jump' : 'A/D steer · Space jump · R rewind';
+    document.getElementById('menu-note').textContent = isMobile ? 'Drag to move · tap to jump' : 'WASD to move · Space jump · R rewind';
     this.ui.showScreen('menu');
     if (!this.world) this.loadLevel(0, true);
   }
@@ -165,13 +167,15 @@ class Game {
     if (!demo) { this.ui.setLevel(theme.name, index); this.ui.setChecks(0, 5); this.ui.setUpgrades(this.counts); }
   }
   resetRun() {
-    this.stats = { accel: 13, maxSpeed: 48, jump: 16, airControl: 0.4, shield: 0, shieldMax: 0, hitKeep: 0.35, magnet: 0, boltBoost: 0.5 };
+    this.stats = { accel: 14, maxSpeed: 48, jump: 16, airControl: 0.4, shield: 0, shieldMax: 0, hitKeep: 0.35, magnet: 0, boltBoost: 0.5 };
     this.counts = {}; for (const k in UPGRADES) this.counts[k] = 0;
-    this.checkpoint = { s: 4, x: 0, y: 0, index: 0 };
-    this.p = { x: 0, y: 0, s: 4, vx: 0, vy: 0, speed: 8, grounded: true, groundSlope: 0, coyote: 0, jumpHold: 0, inv: 0, boostT: 0, landed: false, prevS: 4, fallFrom: 0, grind: null, zip: null, grindT: 0, ringCool: 0 };
+    const s = this.L.start;
+    this.checkpoint = { x: s.x, z: s.z, y: s.y, ang: s.ang, index: 0 };
+    this.p = { x: s.x, y: s.y, z: s.z, vx: 0, vz: 0, vy: 0, heading: s.ang, grounded: true, ground: null, coyote: 0, jumpHold: 0, inv: 0, boostT: 0, landed: false, px: s.x, pz: s.z, fallFrom: 0, grind: null, zip: null, gdir: 1, gt: 0, ringCool: 0, turn: 0 };
+    this.camYaw = s.ang;
     this.time = 0; this.bolts = 0; this.topSpeed = 0; this.gatesPassed = 0;
     for (const cp of this.L.checkpoints) cp.passed = false;
-    this.camPos.set(0, 5, 14); this.camLook.set(0, 1, -10);
+    this.camPos.set(s.x, s.y + 5, s.z + 14); this.camLook.set(s.x, s.y + 1, s.z - 10);
   }
   startLevel(index) {
     if (index >= THEMES.length) { this.showMenu(); return; }
@@ -181,8 +185,8 @@ class Game {
     this.audio.setTheme(index);
     this.state = 'playing';
     this.input.reset();
-    this.ui.toast(this.theme.name, 'Pick your line. Keep the wheels spinning.', 2200);
-    setTimeout(() => this.ui.hint(isMobile ? 'Tap to jump · drag to steer' : 'Space to jump · A/D to steer'), 2400);
+    this.ui.toast(this.theme.name, 'Find the gates. Keep the wheels spinning.', 2200);
+    setTimeout(() => this.ui.hint(isMobile ? 'Drag anywhere to move · tap to jump' : 'WASD to move · Space to jump'), 2400);
   }
   togglePause() {
     if (this.state === 'playing') { this.state = 'paused'; this.ui.showScreen('pause'); this.audio.setMotion(0, true); this.audio.setGrind(false); this.audio.ctx?.suspend(); }
@@ -196,9 +200,11 @@ class Game {
     this.ui.fade(1);
     setTimeout(() => {
       const cp = this.checkpoint, p = this.p;
-      p.x = cp.x; p.y = cp.y; p.s = cp.s; p.prevS = cp.s; p.vx = 0; p.vy = 0; p.speed = 14; p.grounded = true; p.inv = 1.2; p.boostT = 0; p.grind = null; p.zip = null;
+      p.x = cp.x; p.y = cp.y; p.z = cp.z; p.px = cp.x; p.pz = cp.z; p.heading = cp.ang;
+      p.vx = Math.sin(cp.ang) * 14; p.vz = -Math.cos(cp.ang) * 14; p.vy = 0; p.grounded = true; p.inv = 1.2; p.boostT = 0; p.grind = null; p.zip = null;
       this.stats.shield = this.stats.shieldMax;
-      this.camPos.set(cp.x, cp.y + 5, -cp.s + 14); this.camLook.set(cp.x, cp.y + 1, -cp.s - 10);
+      this.camYaw = cp.ang;
+      this.camPos.set(cp.x - Math.sin(cp.ang) * 14, cp.y + 5, cp.z + Math.cos(cp.ang) * 14); this.camLook.set(cp.x, cp.y + 1, cp.z);
       this.input.reset();
       this.ui.fade(0);
       this.ui.toast(reason === 'fall' ? 'Into the void' : 'Rewound', `Back at gate ${cp.index}`, 1200);
@@ -207,7 +213,7 @@ class Game {
   }
   passGate(cp, i) {
     cp.passed = true; cp.gate.light(); this.gatesPassed = i + 1;
-    this.checkpoint = { s: cp.s + 3, x: 0, y: cp.y, index: i + 1 };
+    this.checkpoint = { x: cp.x + Math.sin(cp.ang) * 3, z: cp.z - Math.cos(cp.ang) * 3, y: cp.y, ang: cp.ang, index: i + 1 };
     this.ui.setChecks(this.gatesPassed, 5);
     this.audio.checkpoint();
     this.state = 'upgrade'; this.audio.setMotion(0, true); this.audio.setGrind(false);
@@ -245,246 +251,311 @@ class Game {
       const steps = Math.max(1, Math.min(4, Math.ceil(dt / (1 / 90))));
       for (let i = 0; i < steps; i++) this.step(dt / steps);
       if (this.state !== 'playing') return this.render(dt);
-      this.ui.hud({ speed: p.speed, maxSpeed: this.stats.maxSpeed, time: this.time, bolts: this.bolts });
-      this.audio.setMotion(p.speed / this.stats.maxSpeed, p.grounded || !!p.grind, dt);
+      const sp = Math.hypot(p.vx, p.vz);
+      this.ui.hud({ speed: sp, maxSpeed: this.stats.maxSpeed, time: this.time, bolts: this.bolts });
+      this.audio.setMotion(sp / this.stats.maxSpeed, p.grounded || !!p.grind, dt);
       this.audio.setGrind(!!p.grind);
     } else if (this.state === 'menu') {
-      p.s += dt * 6; p.x = Math.sin(this.worldT * 0.3) * 3; p.speed = 14;
-      const f = this.L.floorAt(p.x, p.s, p.y + 0.6); if (f) p.y = f.y; if (p.s > 50) p.s = 4;
+      const s = this.L.start; const d = ((this.worldT * 6) % 46) + 4;
+      p.x = s.x + Math.sin(this.worldT * 0.3) * 3; p.z = s.z - d; p.vx = 0; p.vz = -14; p.heading = 0;
+      const f = this.L.floorAt(p.x, p.z, p.y + 0.6); if (f) p.y = f.y;
     }
     this.render(dt);
   }
 
   step(dt) {
     const p = this.p, st = this.stats, L = this.L, inp = this.input;
-    p.landed = false; p.prevS = p.s;
+    p.landed = false; p.px = p.x; p.pz = p.z; p.turn *= 1 - Math.min(1, dt * 6);
     const jump = inp.consumeJump();
+    // camera-relative input -> world direction
+    const cy = this.camYaw;
+    const cfx = Math.sin(cy), cfz = -Math.cos(cy), crx = Math.cos(cy), crz = Math.sin(cy);
+    let dx = crx * inp.ix + cfx * inp.iy, dz = crz * inp.ix + cfz * inp.iy;
+    let dm = Math.hypot(dx, dz); if (dm > 1) { dx /= dm; dz /= dm; dm = 1; }
+    const want = dm > 0.12;
 
     // ----- zipline -----
     if (p.zip) {
-      const z = p.zip;
+      const z = p.zip, len = segLen(z);
       if (jump) { p.zip = null; p.vy = st.jump * 0.9; p.grounded = false; p.fallFrom = p.y; this.audio.jump(); this.world.parkTrolley(z); }
       else {
-        p.speed = Math.max(p.speed, st.maxSpeed * 1.25) + 6 * dt; p.speed = Math.min(p.speed, st.maxSpeed * 1.5);
-        p.s += p.speed * dt;
-        const t = (p.s - z.s0) / (z.s1 - z.s0);
-        if (t >= 1) { p.zip = null; p.vy = 2; p.grounded = false; p.fallFrom = p.y; this.world.parkTrolley(z); }
-        else { p.x = lerp(z.x0, z.x1, t); p.y = zipY(z, p.s) - 2.4; p.vy = 0; p.vx = (z.x1 - z.x0) / (z.s1 - z.s0) * p.speed; this.world.moveTrolley(z, p.s); }
-        this.collide(dt); this.topSpeed = Math.max(this.topSpeed, p.speed); p.inv = Math.max(0, p.inv - dt); return;
+        let sp = Math.max(Math.hypot(p.vx, p.vz), st.maxSpeed * 1.25) + 6 * dt; sp = Math.min(sp, st.maxSpeed * 1.5);
+        p.gt += sp * dt / len;
+        const ux = (z.bx - z.ax) / len, uz = (z.bz - z.az) / len, uh = Math.hypot(ux, uz) || 1;
+        p.vx = ux / uh * sp; p.vz = uz / uh * sp; p.heading = headingOf(p.vx, p.vz);
+        if (p.gt >= 1) { p.zip = null; p.vy = 2; p.grounded = false; p.fallFrom = p.y; this.world.parkTrolley(z); }
+        else { const [x, y, zz] = segPoint(z, p.gt); p.x = x; p.z = zz; p.y = y - 2.4; p.vy = 0; this.world.moveTrolley(z, p.gt); }
+        this.collide(dt); this.after(dt); return;
       }
     }
-
     // ----- grinding -----
     if (p.grind) {
-      const r = p.grind;
+      const r = p.grind, len = segLen(r);
       if (jump) { p.grind = null; p.vy = st.jump; p.grounded = false; p.fallFrom = p.y; p.coyote = 0; this.audio.jump(); }
       else {
-        p.speed += (st.accel * 0.5 + 11) * dt;
-        if (p.speed > st.maxSpeed * 1.3) p.speed -= (p.speed - st.maxSpeed * 1.3) * 2 * dt;
-        p.s += p.speed * dt; p.grindT += dt;
-        if (p.s > r.s1) {
-          p.grind = null; p.grounded = false; p.fallFrom = p.y; p.coyote = 0.12;
-          const slope = (r.y1 - r.y0) / (r.s1 - r.s0); p.vy = Math.max(0, p.speed * slope * 0.8); p.vx = (r.x1 - r.x0) / (r.s1 - r.s0) * p.speed;
-        } else {
-          p.x = railX(r, p.s); p.y = railY(r, p.s); p.vy = 0; p.vx = (r.x1 - r.x0) / (r.s1 - r.s0) * p.speed; p.grounded = true; p.groundSlope = 0;
-          if (Math.random() < 0.6) this.sparks.emit(p.x, p.y + 0.1, -p.s, 2, 3, 4, 6);
-        }
-        this.collide(dt); this.topSpeed = Math.max(this.topSpeed, p.speed); p.inv = Math.max(0, p.inv - dt); p.boostT = Math.max(0, p.boostT - dt); return;
+        let sp = Math.hypot(p.vx, p.vz) + (st.accel * 0.5 + 11) * dt;
+        if (sp > st.maxSpeed * 1.3) sp -= (sp - st.maxSpeed * 1.3) * 2 * dt;
+        p.gt += p.gdir * sp * dt / len;
+        const ux = (r.bx - r.ax) / len, uy = (r.by - r.ay) / len, uz = (r.bz - r.az) / len, uh = Math.hypot(ux, uz) || 1;
+        p.vx = p.gdir * ux / uh * sp; p.vz = p.gdir * uz / uh * sp; p.heading = headingOf(p.vx, p.vz);
+        if (p.gt < 0 || p.gt > 1) { p.grind = null; p.grounded = false; p.fallFrom = p.y; p.coyote = 0.12; p.vy = Math.max(0, p.gdir * uy * sp * 0.8); }
+        else { const [x, y, zz] = segPoint(r, p.gt); p.x = x; p.z = zz; p.y = y; p.vy = 0; p.grounded = true; if (Math.random() < 0.6) this.sparks.emit(p.x, p.y + 0.1, p.z, 2, 3, 4, -p.vx * 0.1, -p.vz * 0.1); }
+        this.collide(dt); this.after(dt); return;
       }
     }
 
     // ----- free movement -----
-    const lat = (8 + p.speed * 0.26) * (p.grounded ? 1 : 0.5 + st.airControl * 0.5);
-    const targetVx = inp.steer * lat;
-    p.vx += (targetVx - p.vx) * Math.min(1, dt * (p.grounded ? 11 : 6));
+    let sp = Math.hypot(p.vx, p.vz);
     if (p.grounded) {
-      const sinT = p.groundSlope / Math.sqrt(1 + p.groundSlope * p.groundSlope);
-      p.speed += (st.accel - G * sinT * 0.9) * dt;
-      if (p.speed > st.maxSpeed) p.speed -= (p.speed - st.maxSpeed) * 1.1 * dt;
-      if (p.speed < 3) p.speed = 3;
+      if (want) {
+        if (sp > 2) {
+          const va = headingOf(p.vx, p.vz), ia = headingOf(dx, dz);
+          const d = wrap(ia - va);
+          const turnRate = 5.5 / (1 + sp / 32);
+          const stepA = Math.sign(d) * Math.min(Math.abs(d), turnRate * dt);
+          p.turn += stepA * sp * 0.012;
+          const align = Math.cos(d);
+          if (align < -0.4) sp = Math.max(0, sp - st.accel * 2.2 * dm * dt);   // braking / reversing
+          else sp += st.accel * dm * Math.max(0.25, align) * dt;
+          const na = va + stepA;
+          p.vx = Math.sin(na) * sp; p.vz = -Math.cos(na) * sp;
+        } else { p.vx += dx * st.accel * dt; p.vz += dz * st.accel * dt; }
+      } else {
+        // coasting: momentum carries you, bleeding off slowly
+        const ns = Math.max(0, sp - 4 * dt); if (sp > 0) { p.vx *= ns / sp; p.vz *= ns / sp; }
+      }
+      const b = p.ground;
+      if (b && b.slope) { const sinT = b.slope / Math.sqrt(1 + b.slope * b.slope); p.vx -= b.fx * G * sinT * 0.9 * dt; p.vz -= b.fz * G * sinT * 0.9 * dt; }
+      sp = Math.hypot(p.vx, p.vz);
+      if (sp > st.maxSpeed) { const ns = sp - (sp - st.maxSpeed) * 1.1 * dt; p.vx *= ns / sp; p.vz *= ns / sp; }
     } else {
-      p.speed -= p.speed * 0.012 * dt;
+      if (want) { const k = st.accel * 0.45 * (0.5 + st.airControl) * dt; p.vx += dx * k; p.vz += dz * k; }
+      const ns = Math.max(0, sp - sp * 0.012 * dt); if (sp > 0) { p.vx *= ns / sp; p.vz *= ns / sp; }
+      sp = Math.hypot(p.vx, p.vz);
+      if (sp > st.maxSpeed * 1.5) { p.vx *= st.maxSpeed * 1.5 / sp; p.vz *= st.maxSpeed * 1.5 / sp; }
     }
-    if (jump && (p.grounded || p.coyote > 0)) {
-      p.vy = st.jump; p.grounded = false; p.coyote = 0; p.jumpHold = 0.22; this.audio.jump(); p.fallFrom = p.y;
-    }
+    if (sp > 1.5) p.heading = headingOf(p.vx, p.vz);
+    if (jump && (p.grounded || p.coyote > 0)) { p.vy = st.jump; p.grounded = false; p.coyote = 0; p.jumpHold = 0.22; this.audio.jump(); p.fallFrom = p.y; }
     const lowG = p.vy > 0 && inp.jumpHeld && p.jumpHold > 0;
     p.jumpHold = Math.max(0, p.jumpHold - dt);
     p.vy -= (lowG ? G * 0.5 : G) * dt;
     const prevY = p.y;
-    p.s += p.speed * dt; p.x += p.vx * dt; p.y += p.vy * dt;
-    // invisible side walls follow the walkable extent
-    const lim = L.extentAt(p.s) - 0.7;
-    if (p.x > lim) { p.x = lim; if (p.vx > 0) { p.vx = -p.vx * 0.2; p.speed *= 1 - (1 - st.hitKeep) * 0.08; } }
-    if (p.x < -lim) { p.x = -lim; if (p.vx < 0) { p.vx = -p.vx * 0.2; p.speed *= 1 - (1 - st.hitKeep) * 0.08; } }
+    p.x += p.vx * dt; p.z += p.vz * dt; p.y += p.vy * dt;
+
     // ground
     const tol = p.grounded ? 0.8 : 0.6;
-    const f = p.vy <= 0.01 ? L.floorAt(p.x, p.s, Math.max(p.y, prevY) + tol) : null;
+    const f = p.vy <= 0.01 ? L.floorAt(p.x, p.z, Math.max(p.y, prevY) + tol) : null;
     if (f && p.y <= f.y + 0.05 && (p.grounded || prevY >= f.y - 0.6)) {
-      if (!p.grounded) { p.landed = true; const drop = p.fallFrom - p.y; this.audio.land(drop > 6); if (drop > 12) p.speed *= 0.94; this.shake = Math.max(this.shake, Math.min(0.6, drop * 0.03)); }
-      p.y = f.y; p.vy = 0; p.grounded = true; p.groundSlope = f.block.slope; p.coyote = 0.12; p.fallFrom = p.y;
+      if (!p.grounded) { p.landed = true; const drop = p.fallFrom - p.y; this.audio.land(drop > 6); if (drop > 12) { p.vx *= 0.94; p.vz *= 0.94; } this.shake = Math.max(this.shake, Math.min(0.6, drop * 0.03)); }
+      p.y = f.y; p.vy = 0; p.grounded = true; p.ground = f.block; p.coyote = 0.12; p.fallFrom = p.y;
     } else {
       if (p.grounded) {
         p.grounded = false; p.fallFrom = p.y;
-        if (p.groundSlope > 0.05 && p.vy <= 0.01) { const sinT = p.groundSlope / Math.sqrt(1 + p.groundSlope ** 2); p.vy = p.speed * sinT; p.coyote = 0.1; }
+        const b = p.ground;
+        if (b && b.slope > 0.05 && p.vy <= 0.01) { const along = p.vx * b.fx + p.vz * b.fz; const sinT = b.slope / Math.sqrt(1 + b.slope ** 2); p.vy = Math.max(0, along) * sinT; p.coyote = 0.1; }
       } else p.coyote = Math.max(0, p.coyote - dt);
       if (p.y > p.fallFrom) p.fallFrom = p.y;
-      const wall = L.wallAt(p.x, p.s, p.y);
-      if (wall) {
-        if (wall.top - p.y < 1.1 && p.vy <= 2) { p.y = wall.top; p.vy = 0; p.grounded = true; p.groundSlope = wall.block.slope; p.landed = true; }
-        else { p.s = wall.block.s0 - 0.4; p.speed *= 0.2 + st.hitKeep * 0.2; p.vy = Math.max(p.vy, 3); this.onHit('wall'); }
+    }
+    // walls, pillars, crates, floors we ran into
+    const w = L.wallAt(p.x, p.z, p.y);
+    if (w) {
+      if (!p.grounded && w.top - p.y < 1.1 && p.vy <= 2 && w.block.kind !== 'wall') { p.y = w.top; p.vy = 0; p.grounded = true; p.ground = w.solid ? null : w.block; p.landed = true; }
+      else this.pushOut(w);
+    }
+    if (p.y < L.baseY - 5) { this.respawn('fall'); return; }
+    this.collide(dt);
+    this.after(dt);
+  }
+  after(dt) {
+    const p = this.p;
+    this.topSpeed = Math.max(this.topSpeed, Math.hypot(p.vx, p.vz));
+    p.inv = Math.max(0, p.inv - dt); p.boostT = Math.max(0, p.boostT - dt); p.ringCool = Math.max(0, p.ringCool - dt);
+  }
+  pushOut(w) {
+    const p = this.p, b = w.block, st = this.stats;
+    const penU = b.hw - Math.abs(w.u), penV = b.hl - Math.abs(w.v);
+    let nx, nz;
+    if (penU < penV) { const s = Math.sign(w.u) || 1; nx = b.rx * s; nz = b.rz * s; p.x += nx * (penU + 0.05); p.z += nz * (penU + 0.05); }
+    else { const s = Math.sign(w.v) || 1; nx = b.fx * s; nz = b.fz * s; p.x += nx * (penV + 0.05); p.z += nz * (penV + 0.05); }
+    const vn = p.vx * nx + p.vz * nz;
+    if (vn < 0) {
+      p.vx -= nx * vn * 1.15; p.vz -= nz * vn * 1.15;
+      if (-vn > 14) { // a real slam: lose momentum, feedback
+        const keep = 0.55 + st.hitKeep * 0.3; p.vx *= keep; p.vz *= keep;
+        this.shake = Math.max(this.shake, 0.5); this.audio.land(true); this.sparks.emit(p.x, p.y + 0.8, p.z, 8, 6, 5);
       }
     }
-    if (p.y < -5) { this.respawn('fall'); return; }
-    this.collide(dt);
-    this.topSpeed = Math.max(this.topSpeed, p.speed);
-    p.inv = Math.max(0, p.inv - dt); p.boostT = Math.max(0, p.boostT - dt); p.ringCool = Math.max(0, p.ringCool - dt);
   }
 
   collide(dt) {
     const p = this.p, L = this.L, st = this.stats;
-    const s0 = Math.min(p.prevS, p.s), s1 = Math.max(p.prevS, p.s) + 0.001;
     const cy = p.y + 0.9;
-    // rails: hop on when falling onto one
+    const sp = Math.hypot(p.vx, p.vz);
+    // rails
     if (!p.grind && !p.zip && p.vy <= 1.5) {
       for (const r of L.rails) {
-        if (p.s < r.s0 || p.s > r.s1 - 1) continue;
-        const rx = railX(r, p.s), ry = railY(r, p.s);
-        if (Math.abs(p.x - rx) < 1.1 && p.y - ry > -0.5 && p.y - ry < 1.2) {
-          p.grind = r; p.grindT = 0; p.x = rx; p.y = ry; p.vy = 0; p.grounded = true; p.landed = true; this.audio.railOn(); this.sparks.emit(p.x, p.y, -p.s, 10, 4, 5, 6); break;
+        if (Math.abs(r.ax - p.x) + Math.abs(r.az - p.z) > 400) continue;
+        const t = segParam(r, p.x, p.z); if (t < 0.02 || t > 0.98) continue;
+        const [rx, ry, rz] = segPoint(r, t);
+        if (Math.hypot(p.x - rx, p.z - rz) < 1.1 && p.y - ry > -0.5 && p.y - ry < 1.2) {
+          const along = p.vx * (r.bx - r.ax) + p.vz * (r.bz - r.az);
+          p.grind = r; p.gt = t; p.gdir = along >= 0 ? 1 : -1; p.x = rx; p.z = rz; p.y = ry; p.vy = 0; p.grounded = true; p.landed = true;
+          if (sp < 10) { const len = segLen(r); p.vx = p.gdir * (r.bx - r.ax) / len * 12; p.vz = p.gdir * (r.bz - r.az) / len * 12; }
+          this.audio.railOn(); this.sparks.emit(p.x, p.y, p.z, 10, 4, 5); break;
         }
       }
     }
-    // ziplines: grab the handle
+    // ziplines
     if (!p.zip && !p.grind && p.vy <= 3) {
       for (const z of L.zips) {
-        if (p.s < z.s0 || p.s > z.s1 - 6) continue;
-        const t = (p.s - z.s0) / (z.s1 - z.s0), zx = lerp(z.x0, z.x1, t), cab = zipY(z, p.s);
-        if (Math.abs(p.x - zx) < 1.7 && p.y > cab - 3.8 && p.y < cab - 1.2) { p.zip = z; p.grounded = false; this.audio.zip(); this.ui.toast('ZIP', '', 500); break; }
+        if (Math.abs(z.ax - p.x) + Math.abs(z.az - p.z) > 400) continue;
+        const t = segParam(z, p.x, p.z); if (t > 0.85) continue;
+        const [zx, zy, zz] = segPoint(z, t);
+        if (Math.hypot(p.x - zx, p.z - zz) < 1.7 && p.y > zy - 3.8 && p.y < zy - 1.2) { p.zip = z; p.gt = t; p.grounded = false; this.audio.zip(); this.ui.toast('ZIP', '', 500); break; }
       }
     }
     // bounce pads
     for (const pad of L.pads) {
       pad.cool = Math.max(0, (pad.cool || 0) - dt);
-      if (pad.cool > 0 || Math.abs(pad.s - p.s) > 2.2 || Math.abs(pad.x - p.x) > 2.1 || p.y > pad.y + 0.8 || p.y < pad.y - 0.5) continue;
-      pad.cool = 0.6; pad.anim = 1; p.vy = pad.power; p.grounded = false; p.grind = null; p.fallFrom = p.y; p.speed = Math.min(p.speed + 4, st.maxSpeed * 1.4);
-      this.audio.bounce(); this.sparks.emit(pad.x, pad.y + 0.3, -pad.s, 16, 8, 6, 0); this.shake = Math.max(this.shake, 0.3); p.jumpHold = 0;
+      if (pad.cool > 0 || Math.abs(pad.x - p.x) > 2.2 || Math.abs(pad.z - p.z) > 2.2 || p.y > pad.y + 0.8 || p.y < pad.y - 0.5) continue;
+      if (Math.hypot(pad.x - p.x, pad.z - p.z) > 2.1) continue;
+      pad.cool = 0.6; pad.anim = 1; p.vy = pad.power; p.grounded = false; p.grind = null; p.fallFrom = p.y;
+      const ns = Math.min(sp + 4, st.maxSpeed * 1.4); if (sp > 0.5) { p.vx *= ns / sp; p.vz *= ns / sp; }
+      this.audio.bounce(); this.sparks.emit(pad.x, pad.y + 0.3, pad.z, 16, 8, 6); this.shake = Math.max(this.shake, 0.3); p.jumpHold = 0;
     }
-    // dash rings
+    // dash rings: fling you along their axis
     if (p.ringCool <= 0) for (const ring of L.rings) {
-      if (ring.s < s0 - 0.5 || ring.s > s1 + 0.5) continue;
-      if (Math.hypot(ring.x - p.x, ring.y - cy) < 2.6) {
+      if (Math.abs(ring.x - p.x) > 3 || Math.abs(ring.z - p.z) > 3) continue;
+      if (Math.hypot(ring.x - p.x, ring.y - cy, ring.z - p.z) < 2.6) {
         p.ringCool = 0.4; ring.flash = 1; p.vy = ring.vy; p.grounded = false; p.grind = null; p.zip = null; p.fallFrom = p.y;
-        p.speed = Math.max(p.speed, st.maxSpeed * 1.4); p.boostT = 0.6; this.audio.ring(); this.flashAmt = 0.25; this.flashTint.set(0.4, 1, 1);
-        this.sparks.emit(ring.x, ring.y, -ring.s, 14, 6, 4, -4); this.ui.toast('DASH', '', 500); break;
+        const ns = Math.max(sp, st.maxSpeed * 1.4); p.vx = ring.dx * ns; p.vz = ring.dz * ns; p.heading = headingOf(p.vx, p.vz);
+        p.boostT = 0.6; this.audio.ring(); this.flashAmt = 0.25; this.flashTint.set(0.4, 1, 1);
+        this.sparks.emit(ring.x, ring.y, ring.z, 14, 6, 4); this.ui.toast('DASH', '', 500); break;
       }
     }
     // bolts
     const reach = 1.6 + st.magnet;
     for (const b of this.world.bolts) {
-      if (b.taken || b.s < s0 - reach || b.s > s1 + reach) continue;
-      if (Math.abs(b.x - p.x) < reach && Math.abs(b.y - cy) < reach + 0.4) {
+      if (b.taken || Math.abs(b.x - p.x) > reach || Math.abs(b.z - p.z) > reach) continue;
+      if (Math.abs(b.y - cy) < reach + 0.4) {
         this.world.takeBolt(b); this.bolts++; this.audio.bolt(this.bolts);
-        p.speed = Math.min(p.speed + st.boltBoost, st.maxSpeed * 1.4);
+        const ns = Math.min(sp + st.boltBoost, st.maxSpeed * 1.4); if (sp > 0.5) { p.vx *= ns / sp; p.vz *= ns / sp; }
       }
     }
-    // boosts
+    // dash panels: set your direction and fire you forward
     for (const b of this.world.boosts) {
       b.cool = Math.max(0, b.cool - dt);
-      if (b.cool > 0 || b.s1 < s0 || b.s0 > s1) continue;
-      if (p.x > b.x0 - 0.5 && p.x < b.x1 + 0.5 && p.y < b.y + 0.8 && p.y > b.y - 0.5) {
-        b.cool = 2; p.speed = Math.min(Math.max(p.speed + 16, st.maxSpeed * 1.2), st.maxSpeed * 1.5); p.boostT = 0.9; this.audio.boost();
-        this.ui.toast('BOOST', '', 600); this.flashAmt = 0.25; this.flashTint.set(0.3, 1, 1);
-      }
+      if (b.cool > 0 || Math.abs(b.x - p.x) > 3 || Math.abs(b.z - p.z) > 3 || p.y > b.y + 0.8 || p.y < b.y - 0.5) continue;
+      const [u, v] = localUV(b, p.x, p.z); if (Math.abs(u) > 2.6 || Math.abs(v) > 2.6) continue;
+      b.cool = 2; const ns = Math.min(Math.max(sp + 16, st.maxSpeed * 1.2), st.maxSpeed * 1.5);
+      p.vx = b.fx * ns; p.vz = b.fz * ns; p.heading = headingOf(p.vx, p.vz); p.boostT = 0.9; this.audio.boost();
+      this.ui.toast('BOOST', '', 600); this.flashAmt = 0.25; this.flashTint.set(0.3, 1, 1);
     }
     if (p.inv <= 0) {
-      for (const h of L.hazards) {
-        if (h.type === 'spikes') {
-          if (h.s1 < s0 || h.s0 > s1) continue;
-          if (p.x > h.x0 - 0.3 && p.x < h.x1 + 0.3 && p.y < h.y + 0.55 && p.y > h.y - 0.5) { this.onHit('spikes'); break; }
-        } else if (h.type === 'drone') {
-          if (h.hit > 0 || Math.abs(h.s - p.s) > 3) continue;
-          const dx = h.px - p.x, dy = h.group.position.y - cy, dz = h.s - p.s;
-          if (dx * dx + dy * dy * 0.6 + dz * dz < 1.9 * 1.9) { h.hit = 2.5; this.onHit('drone'); break; }
-        } else if (h.type === 'laser') {
-          if (!h.on || h.s < s0 || h.s > s1) continue;
-          if (p.x < h.x0 - 0.4 || p.x > h.x1 + 0.4) continue;
-          if (p.y < h.y - 0.6) continue;
-          const hitLow = p.y < h.y + 0.25 && !h.tall, hitTall = h.tall && p.y < h.y + 2.6;
-          if (hitLow || hitTall) { this.onHit('laser'); break; }
-        } else if (h.type === 'hurdle' || h.type === 'pillar') {
-          if (h.s1 < s0 || h.s0 > s1) continue;
-          if (p.x > h.x0 - 0.5 && p.x < h.x1 + 0.5 && p.y < h.y + h.h - 0.25 && p.y > h.y - 0.5) { p.s = h.s0 - 0.6; p.vy = Math.max(p.vy, 4); p.grind = null; this.onHit(h.type); break; }
-        }
+      for (const h of L.spikes) {
+        if (Math.abs(h.cx - p.x) > h.hw + h.hl + 2 || Math.abs(h.cz - p.z) > h.hw + h.hl + 2) continue;
+        const [u, v] = localUV(h, p.x, p.z);
+        if (Math.abs(u) < h.hw + 0.3 && Math.abs(v) < h.hl + 0.3 && p.y < h.y + 0.55 && p.y > h.y - 0.5) { this.onHit('spikes'); break; }
+      }
+      if (p.inv <= 0) for (const h of this.world.drones) {
+        if (h.hit > 0 || Math.abs(h.px - p.x) > 3 || Math.abs(h.pz - p.z) > 3) continue;
+        const dx = h.px - p.x, dy = h.group.position.y - cy, dz = h.pz - p.z;
+        if (dx * dx + dy * dy * 0.6 + dz * dz < 1.9 * 1.9) { h.hit = 2.5; this.onHit('drone'); break; }
+      }
+      if (p.inv <= 0) for (const h of this.world.lasers) {
+        if (!h.on || Math.abs((h.ax + h.bx) / 2 - p.x) > 40 || Math.abs((h.az + h.bz) / 2 - p.z) > 40) continue;
+        const t = segParam(h, p.x, p.z); const lx = h.ax + (h.bx - h.ax) * t, lz = h.az + (h.bz - h.az) * t;
+        // swept: did we cross the beam line this step?
+        const d1 = Math.hypot(p.x - lx, p.z - lz);
+        const nx = -(h.bz - h.az), nz = (h.bx - h.ax); const side0 = (p.px - h.ax) * nx + (p.pz - h.az) * nz, side1 = (p.x - h.ax) * nx + (p.z - h.az) * nz;
+        if (!(d1 < 0.6 || (side0 * side1 < 0 && t > 0.001 && t < 0.999))) continue;
+        if (p.y < h.y - 0.6) continue;
+        const hitLow = p.y < h.y + 0.25 && !h.tall, hitTall = h.tall && p.y < h.y + 2.6;
+        if (hitLow || hitTall) { this.onHit('laser'); break; }
       }
     }
+    // gates
     for (let i = 0; i < L.checkpoints.length; i++) {
       const cp = L.checkpoints[i];
-      if (!cp.passed && cp.s >= s0 && cp.s <= s1) { this.passGate(cp, i); return; }
+      if (cp.passed || Math.abs(cp.x - p.x) > 40 || Math.abs(cp.z - p.z) > 40) continue;
+      const [u, v] = localUV(cp, p.x, p.z); const [, v0] = localUV(cp, p.px, p.pz);
+      if (Math.abs(u) < cp.hw + 1 && v0 < 0 && v >= 0) { this.passGate(cp, i); return; }
     }
-    if (L.finishS >= s0 && L.finishS <= s1) { this.world.finishGate.light(); this.finish(); }
+    const fin = L.finish;
+    if (Math.abs(fin.x - p.x) < 40 && Math.abs(fin.z - p.z) < 40) { const [u, v] = localUV(fin, p.x, p.z); const [, v0] = localUV(fin, p.px, p.pz); if (Math.abs(u) < fin.hw + 1 && v0 < 0 && v >= 0) { this.world.finishGate.light(); this.finish(); } }
   }
 
   onHit(kind) {
     const p = this.p, st = this.stats;
     if (st.shield > 0) { st.shield--; p.inv = 1.0; this.ui.toast('Shield', 'plating absorbed it', 900); this.flashAmt = 0.3; this.flashTint.set(1, 0.85, 0.2); this.audio.click(); this.shake = 0.4; return; }
-    if (kind !== 'wall' && kind !== 'hurdle' && kind !== 'pillar') p.speed *= st.hitKeep;
+    p.vx *= st.hitKeep; p.vz *= st.hitKeep;
     p.inv = 1.1; p.vy = Math.max(p.vy, 5); p.grounded = false; p.grind = null;
     this.shake = 1; this.flashAmt = 0.6; this.flashTint.set(1, 0.2, 0.3);
-    this.audio.hit(); this.sparks.emit(p.x, p.y + 1, -p.s, 12, 8, 8, 4);
-    const names = { spikes: 'Spikes', drone: 'Drone', laser: 'Laser', hurdle: 'Barrier', wall: 'Wall', pillar: 'Pillar' };
+    this.audio.hit(); this.sparks.emit(p.x, p.y + 1, p.z, 12, 8, 8);
+    const names = { spikes: 'Spikes', drone: 'Drone', laser: 'Laser' };
     this.ui.toast(names[kind] || 'Hit', 'momentum lost', 900);
   }
 
   // ---------- presentation ----------
   render(dt) {
     const p = this.p, st = this.stats, cam = this.camera;
-    const sf = Math.min(1.5, p.speed / st.maxSpeed);
-    this.mech.root.position.set(p.x, p.y, -p.s);
-    this.mech.update(dt, { speed: p.speed, maxSpeed: st.maxSpeed, vx: p.vx, vy: p.vy, grounded: p.grounded, boost: p.boostT > 0, landed: p.landed, grind: !!p.grind, zip: !!p.zip });
+    const sp = Math.hypot(p.vx, p.vz);
+    const sf = Math.min(1.5, sp / st.maxSpeed);
+    this.mech.root.position.set(p.x, p.y, p.z);
+    this.mech.update(dt, { speed: sp, maxSpeed: st.maxSpeed, heading: p.heading, turn: p.turn, vy: p.vy, grounded: p.grounded, boost: p.boostT > 0, landed: p.landed, grind: !!p.grind, zip: !!p.zip });
     this.mech.root.visible = !(p.inv > 0 && Math.sin(this.worldT * 40) > 0.4 && this.state === 'playing');
     this.sparks.update(dt);
 
+    // chase camera: swing in behind the direction of travel
     const menu = this.state === 'menu';
+    const inp = this.input;
+    let targetYaw = this.camYaw;
+    if (sp > 3) targetYaw = p.heading;
+    else if (Math.hypot(inp.ix, inp.iy) > 0.3 && !menu) targetYaw = this.camYaw + Math.atan2(inp.ix, inp.iy) * 0.0; // hold yaw while stopped
+    const dy = wrap(targetYaw - this.camYaw);
+    this.camYaw += dy * Math.min(1, dt * (menu ? 1 : 2.6 + sf * 1.5));
     const portrait = cam.aspect < 0.9 ? 1 : 0;
-    const back = (menu ? 11 : 8 + sf * 3.4) + portrait * 3.5, up = (menu ? 4.5 : 3.7 + sf * 1.0) + portrait * 1.2 + (p.zip ? 1.5 : 0);
-    const tx = p.x * 0.8, ty = p.y + up, tz = -p.s + back;
-    const k = Math.min(1, dt * (menu ? 2 : 7));
-    this.camPos.x += (tx - this.camPos.x) * k; this.camPos.z += (tz - this.camPos.z) * Math.min(1, dt * 12);
+    const back = (menu ? 12 : 8.5 + sf * 3.4) + portrait * 3.5, up = (menu ? 4.5 : 3.9 + sf * 1.0) + portrait * 1.2 + (p.zip ? 1.5 : 0);
+    const fx = Math.sin(this.camYaw), fz = -Math.cos(this.camYaw);
+    const tx = p.x - fx * back, tz = p.z - fz * back, ty = p.y + up;
+    const k = Math.min(1, dt * (menu ? 2 : 9));
+    this.camPos.x += (tx - this.camPos.x) * k; this.camPos.z += (tz - this.camPos.z) * k;
     this.camPos.y += (ty - this.camPos.y) * Math.min(1, dt * (p.grounded ? 7 : 3.5));
-    this.camLook.x += (p.x * 0.9 - this.camLook.x) * k; this.camLook.y += (p.y + 1.4 - this.camLook.y) * Math.min(1, dt * 4); this.camLook.z = -p.s - 12;
+    const lx = p.x + fx * 7, lz = p.z + fz * 7;
+    this.camLook.x += (lx - this.camLook.x) * Math.min(1, dt * 10); this.camLook.z += (lz - this.camLook.z) * Math.min(1, dt * 10);
+    this.camLook.y += (p.y + 1.4 - this.camLook.y) * Math.min(1, dt * 4);
     const wob = Math.max(0, (sf - 0.62) / 0.5);
     const t = this.worldT;
     this.shake = Math.max(0, this.shake - dt * 2.2);
     const sh = this.shake * this.shake;
     const ox = (Math.sin(t * 13.1) * 0.11 + Math.sin(t * 7.3) * 0.07) * wob + (Math.random() - 0.5) * sh * 0.6;
     const oy = (Math.sin(t * 11.7) * 0.07) * wob + (Math.random() - 0.5) * sh * 0.4;
-    cam.position.set(this.camPos.x + ox, this.camPos.y + oy, this.camPos.z);
+    cam.position.set(this.camPos.x + ox * Math.cos(this.camYaw), this.camPos.y + oy, this.camPos.z + ox * Math.sin(this.camYaw));
     cam.lookAt(this.camLook);
-    cam.rotation.z += -p.vx * 0.005 + Math.sin(t * 9.1) * 0.018 * wob + (Math.random() - 0.5) * sh * 0.04;
+    cam.rotation.z += -p.turn * 0.25 + Math.sin(t * 9.1) * 0.018 * wob + (Math.random() - 0.5) * sh * 0.04;
     const targetFov = menu ? 58 : 62 + 30 * Math.min(1, sf) + (p.boostT > 0 ? 8 : 0);
     this.fov += (targetFov - this.fov) * Math.min(1, dt * 5);
     if (Math.abs(cam.fov - this.fov) > 0.05) { cam.fov = this.fov; cam.updateProjectionMatrix(); }
 
-    this.sun.position.set(p.x + this.sunOffset.x, p.y + this.sunOffset.y, -p.s + this.sunOffset.z);
-    this.sun.target.position.set(p.x, p.y, -p.s - 6);
+    this.sun.position.set(p.x + this.sunOffset.x, p.y + this.sunOffset.y, p.z + this.sunOffset.z);
+    this.sun.target.position.set(p.x, p.y, p.z);
     this.sky.mesh.position.set(cam.position.x, 0, cam.position.z);
 
     const sl = this.speedLines, arr = sl.geometry.attributes.position.array;
     const vis = menu ? 0 : Math.max(0, (sf - 0.4) / 0.6);
     sl.material.opacity = vis * 0.28;
     if (vis > 0) {
-      const len = 0.4 + p.speed * 0.06;
+      const len = 0.4 + sp * 0.06;
       for (let i = 0; i < this.slN; i++) {
         const d = this.slData[i];
-        d.z += p.speed * dt * 1.7; if (d.z > -6) { d.z = -40 - Math.random() * 15; }
+        d.z += sp * dt * 1.7; if (d.z > -6) { d.z = -40 - Math.random() * 15; }
         arr[i * 6] = d.x; arr[i * 6 + 1] = d.y; arr[i * 6 + 2] = d.z; arr[i * 6 + 3] = d.x; arr[i * 6 + 4] = d.y; arr[i * 6 + 5] = d.z + len;
       }
       sl.geometry.attributes.position.needsUpdate = true;
     }
 
     if (this.scenery) this.scenery.update(dt, this.worldT, cam, { lightning: () => { this.flashAmt = Math.max(this.flashAmt, 0.35); this.flashTint.set(0.9, 0.95, 1); }, thunder: () => this.audio.thunder() });
-    this.world.update(dt, p.s, cam.position.z);
+    this.world.update(dt, cam.position);
 
     this.flashAmt = Math.max(0, this.flashAmt - dt * 2.5);
     const blur = menu ? 0 : Math.max(0, (sf - 0.45) / 0.8) * 0.9 + (p.boostT > 0 ? 0.3 : 0);

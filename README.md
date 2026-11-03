@@ -2,7 +2,7 @@
 
 A momentum runner. You are a tech gnome who unbolted a Halvex Robotics spider-walker (wheels on every foot) and rode it out the loading door. Build speed, keep it, and use it to clear ravines, launch off ramps and thread the recall crew's spikes, drones and laser gates.
 
-Three levels, five gates each, and the routes branch: left or right lanes over a void, a low road with hazards under a high road with bolts, wide fields with pillars to weave through, rail runs, ziplines over long drops, bounce towers and dash-ring chains. Grind rails by landing on them, grab a zipline handle by running or jumping under it, bounce pads fire you upward, dash rings fling you forward past top speed.
+Three levels, five gates each. Each level is a winding course in the spirit of 3D Sonic: you move freely in any direction, momentum carries you through turns, and the road climbs hills, bends through curves, opens into plazas with pillars and side nooks, and branches into left/right lanes, high and low roads, rail runs, ziplines, bounce towers and dash-ring chains. Edges of plain roads have low curbs; everything else is open, so a bad line means a fall and a rewind. Grind rails by landing on them, grab a zipline handle by running or jumping under it, bounce pads fire you upward, dash panels and rings fling you forward past top speed.
 
 Every gate saves a checkpoint and offers one of three parts (top speed, acceleration, jump, air control, shield, grip, bolt magnet). The **Checkpoint** button (or `R`) rewinds you to the last gate, because losing momentum in the wrong spot can leave you stuck.
 
@@ -14,7 +14,7 @@ Every gate saves a checkpoint and offers one of three parts (top speed, accelera
 
 ## Controls
 
-- **Steer**: drag a finger left or right, or `A`/`D` / arrow keys
+- **Move**: drag a finger in any direction (a joystick appears where you touch), or `WASD` / arrow keys. Direction is relative to the camera, which swings in behind your heading.
 - **Jump**: tap, or `Space`. Hold for a longer arc. A second finger while steering jumps instantly. Jump again to hop off a rail or let go of a zipline.
 - **Rewind to checkpoint**: the on-screen button or `R`
 - **Pause**: `Esc` / `P`. **Mute**: `M`.
@@ -33,8 +33,8 @@ python3 -m http.server 8765
 ## Layout
 
 - `index.html`: markup, CSS, import map, HUD and menus
-- `src/main.js`: game loop, physics, camera, collisions, state machine
-- `src/level.js`: seeded chunk-based level generator and collision queries
+- `src/main.js`: game loop, free-direction momentum physics, chase camera, collisions, state machine
+- `src/level.js`: seeded generator for a winding course of rotated floor rectangles in world space, plus collision queries
 - `src/world.js`: builds track slabs, hazards, bolts and gates from level data
 - `src/themes.js`: the three environments (sky, fog, lights, scenery, weather)
 - `src/textures.js`: procedural canvas textures
@@ -46,4 +46,4 @@ python3 -m http.server 8765
 
 ## Tuning notes
 
-Physics lives at the top of `src/main.js` (`G`) and in `resetRun()` (base acceleration, top speed, jump). Rail, zipline, pad and ring behaviour is in `step()` and `collide()` there. Gap widths, ramp angles and hazard density scale with a `tier` value in `src/level.js` that rises per section and per level; the chunk pool and its weights are in `generateLevel()`. The walkable width at each distance (`extentAt`) drives both the invisible side walls and where the scenery stands.
+Physics lives at the top of `src/main.js` (`G`) and in `resetRun()` (base acceleration, top speed, jump). Turning rate at speed is the `turnRate` line in `step()`; rail, zipline, pad and ring behaviour is in `step()` and `collide()`. Chunks in `src/level.js` are written in a local frame (`u` lateral, `v` along the heading) and placed by the cursor; `plaza` and `curve` change the heading, and a self-intersection check regenerates a seed whose course crosses itself. Scenery in `src/themes.js` is laid along `L.segments` and scattered across `L.bounds` away from the road.

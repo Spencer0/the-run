@@ -15,10 +15,14 @@ export class UI {
     this.el = {
       hud: $('hud'), level: $('hud-level'), checks: $('hud-checks'), time: $('hud-time'), bolts: $('hud-bolts'), speed: $('hud-speed'), bar: $('hud-bar'), ups: $('hud-ups'),
       toast: $('toast'), flash: $('flash'), fade: $('fade'), hint: $('hint'), loading: $('loading'),
-      menu: $('screen-menu'), upgrade: $('screen-upgrade'), pause: $('screen-pause'), complete: $('screen-complete'), picks: $('picks'), levelList: $('level-list'),
+      stick: $('stick'), menu: $('screen-menu'), upgrade: $('screen-upgrade'), pause: $('screen-pause'), complete: $('screen-complete'), picks: $('picks'), levelList: $('level-list'),
     };
     this.toastTimer = null; this.hintTimer = null;
     this.lastSpeed = -1; this.lastTime = ''; this.lastBolts = -1;
+  }
+  stick(on, x, y, ix, iy) {
+    const el = this.el.stick; el.classList.toggle('on', on);
+    if (on) { el.style.left = x + 'px'; el.style.top = y + 'px'; el.firstElementChild.style.transform = `translate(${ix * 38}px, ${-iy * 38}px)`; }
   }
   showScreen(name) {
     for (const k of ['menu', 'upgrade', 'pause', 'complete']) this.el[k].hidden = k !== name;

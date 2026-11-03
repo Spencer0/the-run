@@ -128,6 +128,9 @@
     color: var(--paper-dim); background: var(--panel); padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line); opacity: 0; transition: opacity .4s; white-space: nowrap; }
   #hint.show { opacity: 1; }
   .loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--paper-dim); font-size: 13px; letter-spacing: .2em; text-transform: uppercase; }
+  #stick { position: absolute; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; border: 2px solid rgba(243,239,230,.35); background: rgba(13,18,28,.35); pointer-events: none; opacity: 0; transition: opacity .15s; }
+  #stick i { position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%; background: rgba(255,122,26,.85); box-shadow: 0 0 18px rgba(255,122,26,.6); }
+  #stick.on { opacity: 1; }
   .kbd { display: inline-block; border: 1px solid var(--line); border-radius: 5px; padding: 0 6px; font-size: 11px; color: var(--paper); background: rgba(0,0,0,.3); }
   @media (prefers-reduced-motion: reduce) { .pick, .btn { transition: none; } }
 </style>
@@ -165,6 +168,7 @@
       </button>
     </div>
   </div>
+  <div id="stick"><i></i></div>
   <div id="hint"></div>
   <div id="toast"></div>
   <div id="flash"></div>
@@ -180,9 +184,9 @@
       <p class="lede">You are a tech gnome who just unbolted a Halvex Robotics spider-walker and rode it out the loading door. Keep the wheels spinning. Momentum is the only thing between you and the recall crew.</p>
       <div class="levels" id="level-list"></div>
       <div class="controls">
-        <div><b>Steer</b>Drag a finger left or right · <span class="kbd">A</span>/<span class="kbd">D</span> or arrows</div>
+        <div><b>Move</b>Drag a finger in any direction · <span class="kbd">W</span><span class="kbd">A</span><span class="kbd">S</span><span class="kbd">D</span> or arrows. Momentum carries you through turns.</div>
         <div><b>Jump</b>Tap the screen · <span class="kbd">Space</span>. Hold for a longer hop.</div>
-        <div><b>Routes</b>High road or low road, left or right. Rails grind, zipline handles carry you, pads bounce you up, rings fling you forward.</div>
+        <div><b>Explore</b>Plazas, hills, side ledges and nooks hold bolts. Rails grind, zipline handles carry you, pads bounce you up, rings and dash panels fling you forward.</div>
         <div><b>Stuck?</b>Checkpoint button · <span class="kbd">R</span> rewinds you to the last gate. Every gate also bolts on one of three parts.</div>
       </div>
       <div class="row">
