@@ -1,0 +1,246 @@
+<title>The Run</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Chakra+Petch:wght@400;600;700&display=swap">
+<style>
+  /* Layout: one-screen WebGL game; HTML overlay for HUD + menus. Single committed dark arcade look. */
+  :root {
+    --ink: #07090f;
+    --ink-2: #10151f;
+    --panel: rgba(13, 18, 28, 0.86);
+    --line: rgba(243, 239, 230, 0.14);
+    --paper: #f3efe6;
+    --paper-dim: rgba(243, 239, 230, 0.62);
+    --ember: #ff7a1a;
+    --ember-deep: #c74d05;
+    --volt: #37e8ff;
+    --moss: #7ed957;
+    --danger: #ff3b5c;
+    --display: 'Bungee', 'Impact', 'Arial Black', sans-serif;
+    --body: 'Chakra Petch', 'Segoe UI', system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--ink); color: var(--paper); font-family: var(--body);
+    overflow: hidden; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
+  #app { position: fixed; inset: 0; }
+  #gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #gl canvas { display: block; width: 100%; height: 100%; }
+
+  /* ---------- HUD ---------- */
+  .hud { position: absolute; inset: 0; pointer-events: none; display: grid;
+    grid-template-rows: auto 1fr auto; padding-top: max(10px, env(safe-area-inset-top, 0px));
+    padding-bottom: max(10px, env(safe-area-inset-bottom, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+    transition: opacity .3s; }
+  .hud[hidden] { display: none; }
+  .hud-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .hud-bottom { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
+  .pill { background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px;
+    font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; backdrop-filter: blur(6px); }
+  .checks { display: flex; gap: 5px; align-items: center; }
+  .checks i { width: 10px; height: 10px; border-radius: 2px; background: rgba(243,239,230,.18); transform: rotate(45deg); transition: background .3s, box-shadow .3s; }
+  .checks i.on { background: var(--ember); box-shadow: 0 0 10px var(--ember); }
+  .checks i.goal { border-radius: 50%; }
+  .stat-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .ups { display: flex; gap: 6px; }
+  .up { display: flex; align-items: center; gap: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; font-size: 12px; font-weight: 700; }
+  .up b { color: var(--volt); font-family: var(--display); font-weight: 400; font-size: 13px; }
+
+  .speedo { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+  .speedo .num { font-family: var(--display); font-size: clamp(44px, 9vw, 72px); line-height: .9; color: var(--paper);
+    text-shadow: 0 0 18px rgba(255,122,26,.35); font-variant-numeric: tabular-nums; min-width: 2.2ch; }
+  .speedo .num.hot { color: var(--ember); text-shadow: 0 0 24px rgba(255,122,26,.75); }
+  .speedo .unit { font-size: 12px; letter-spacing: .18em; text-transform: uppercase; color: var(--paper-dim); font-weight: 700; }
+  .bar { width: clamp(140px, 30vw, 240px); height: 8px; border-radius: 4px; background: rgba(243,239,230,.12); overflow: hidden; border: 1px solid var(--line); }
+  .bar > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--volt), var(--ember)); transition: width .08s linear; }
+  .bar > i.over { background: linear-gradient(90deg, var(--ember), #fff); }
+
+  .btn { pointer-events: auto; font-family: var(--body); font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    background: var(--panel); color: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; font-size: 14px;
+    cursor: pointer; backdrop-filter: blur(6px); display: inline-flex; align-items: center; gap: 8px; min-height: 44px; }
+  .btn:active { transform: translateY(1px); }
+  .btn:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; }
+  .btn.primary { background: var(--ember); color: #1a0d00; border-color: transparent; }
+  .btn.primary:hover { background: #ff8c3a; }
+  .btn.icon { width: 44px; padding: 0; justify-content: center; border-radius: 50%; font-size: 18px; }
+  .btn.cp { border-color: rgba(255,122,26,.55); }
+  .btn.cp svg { width: 18px; height: 18px; }
+  .hud-actions { display: flex; gap: 10px; align-items: center; }
+
+  /* ---------- Screens ---------- */
+  .screen { position: absolute; inset: 0; display: grid; place-items: center; padding-block: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-bottom, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+    background: radial-gradient(ellipse at 50% 20%, rgba(255,122,26,.12), transparent 60%), rgba(7,9,15,.72); overflow-y: auto; }
+  .screen[hidden] { display: none; }
+  .card { width: min(560px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 20px; padding: 26px 22px; backdrop-filter: blur(10px);
+    display: flex; flex-direction: column; gap: 18px; box-shadow: 0 30px 80px rgba(0,0,0,.5); }
+  .eyebrow { font-size: 12px; letter-spacing: .22em; text-transform: uppercase; color: var(--ember); font-weight: 700; }
+  h1 { font-family: var(--display); font-weight: 400; font-size: clamp(42px, 10vw, 76px); line-height: .92; margin: 0; letter-spacing: .01em; text-wrap: balance;
+    background: linear-gradient(180deg, #fff 20%, var(--ember) 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  h2 { font-family: var(--display); font-weight: 400; font-size: clamp(24px, 6vw, 36px); margin: 0; line-height: 1; text-wrap: balance; }
+  p { margin: 0; line-height: 1.5; color: var(--paper-dim); max-width: 60ch; }
+  .lede { color: var(--paper); font-size: 15px; }
+  .levels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  @media (max-width: 520px) { .levels { grid-template-columns: 1fr; } }
+  .level { pointer-events: auto; text-align: left; background: var(--ink-2); border: 1px solid var(--line); border-radius: 14px; padding: 12px; cursor: pointer; color: var(--paper);
+    font-family: var(--body); display: flex; flex-direction: column; gap: 6px; min-height: 110px; position: relative; overflow: hidden; }
+  .level:hover, .level:focus-visible { border-color: var(--ember); outline: none; }
+  .level .swatch { height: 46px; border-radius: 8px; }
+  .level .name { font-family: var(--display); font-size: 14px; letter-spacing: .02em; }
+  .level .meta { font-size: 12px; color: var(--paper-dim); font-variant-numeric: tabular-nums; }
+  .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 13px; }
+  .controls div { background: var(--ink-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+  .controls b { display: block; color: var(--volt); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; margin-bottom: 4px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .row.end { justify-content: flex-end; }
+  .spacer { flex: 1; }
+  .toggle { pointer-events: auto; display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--paper-dim); cursor: pointer; }
+  .toggle input { accent-color: var(--ember); width: 18px; height: 18px; }
+
+  /* Upgrade picks */
+  .picks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  @media (max-width: 520px) { .picks { grid-template-columns: 1fr; } }
+  .pick { pointer-events: auto; background: var(--ink-2); border: 1px solid var(--line); border-radius: 14px; padding: 14px 12px; cursor: pointer; color: var(--paper);
+    font-family: var(--body); text-align: left; display: flex; flex-direction: column; gap: 8px; min-height: 140px; transition: transform .12s, border-color .12s; }
+  .pick:hover, .pick:focus-visible { border-color: var(--volt); transform: translateY(-2px); outline: none; }
+  .pick .ico { width: 42px; height: 42px; border-radius: 10px; display: grid; place-items: center; font-family: var(--display); font-size: 18px; color: #061015; }
+  .pick .t { font-family: var(--display); font-size: 15px; }
+  .pick .d { font-size: 12.5px; color: var(--paper-dim); line-height: 1.4; }
+  .pick .lvl { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--volt); font-weight: 700; }
+
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .stats div { background: var(--ink-2); border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
+  .stats b { display: block; font-family: var(--display); font-size: 22px; font-weight: 400; font-variant-numeric: tabular-nums; }
+  .stats span { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--paper-dim); font-weight: 700; }
+
+  /* toasts + flash */
+  #toast { position: absolute; left: 50%; top: 18%; transform: translateX(-50%); pointer-events: none; font-family: var(--display); font-size: clamp(22px, 5vw, 40px);
+    color: var(--paper); text-shadow: 0 0 30px rgba(55,232,255,.7); opacity: 0; transition: opacity .25s, transform .25s; text-align: center; width: min(92vw, 720px); text-wrap: balance; }
+  #toast.show { opacity: 1; transform: translateX(-50%) scale(1.04); }
+  #toast small { display: block; font-family: var(--body); font-size: 13px; letter-spacing: .2em; text-transform: uppercase; color: var(--paper-dim); text-shadow: none; }
+  #flash { position: absolute; inset: 0; pointer-events: none; background: var(--danger); opacity: 0; mix-blend-mode: screen; }
+  #fade { position: absolute; inset: 0; pointer-events: none; background: var(--ink); opacity: 0; transition: opacity .25s; }
+  #hint { position: absolute; left: 50%; bottom: 22%; transform: translateX(-50%); pointer-events: none; font-size: 13px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--paper-dim); background: var(--panel); padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line); opacity: 0; transition: opacity .4s; white-space: nowrap; }
+  #hint.show { opacity: 1; }
+  .loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--paper-dim); font-size: 13px; letter-spacing: .2em; text-transform: uppercase; }
+  .kbd { display: inline-block; border: 1px solid var(--line); border-radius: 5px; padding: 0 6px; font-size: 11px; color: var(--paper); background: rgba(0,0,0,.3); }
+  @media (prefers-reduced-motion: reduce) { .pick, .btn { transition: none; } }
+</style>
+
+<div id="app">
+  <div id="gl"></div>
+  <div id="loading" class="loading">Loading the run…</div>
+
+  <div id="hud" class="hud" hidden>
+    <div class="hud-top">
+      <div class="stat-row" style="justify-content:flex-start">
+        <div class="pill" id="hud-level">Level 1</div>
+        <div class="pill checks" id="hud-checks"><i></i><i></i><i></i><i></i><i></i><i class="goal"></i></div>
+      </div>
+      <div class="stat-row">
+        <div class="pill" id="hud-time">0:00.0</div>
+        <div class="pill" id="hud-bolts">⚙ 0</div>
+        <div class="hud-actions">
+          <button class="btn icon" id="btn-mute" title="Sound" aria-label="Toggle sound">♪</button>
+          <button class="btn icon" id="btn-pause" title="Pause" aria-label="Pause">▐▐</button>
+        </div>
+      </div>
+    </div>
+    <div></div>
+    <div class="hud-bottom">
+      <div class="speedo">
+        <div class="ups" id="hud-ups"></div>
+        <div class="num" id="hud-speed">0</div>
+        <div class="bar"><i id="hud-bar"></i></div>
+        <div class="unit">momentum</div>
+      </div>
+      <button class="btn cp" id="btn-checkpoint" aria-label="Back to checkpoint">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
+        Checkpoint
+      </button>
+    </div>
+  </div>
+  <div id="hint"></div>
+  <div id="toast"></div>
+  <div id="flash"></div>
+  <div id="fade"></div>
+
+  <!-- Title / level select -->
+  <div id="screen-menu" class="screen" hidden>
+    <div class="card">
+      <div>
+        <div class="eyebrow">A momentum runner</div>
+        <h1>The Run</h1>
+      </div>
+      <p class="lede">You are a tech gnome who just unbolted a Halvex Robotics spider-walker and rode it out the loading door. Keep the wheels spinning. Momentum is the only thing between you and the recall crew.</p>
+      <div class="levels" id="level-list"></div>
+      <div class="controls">
+        <div><b>Steer</b>Drag a finger left or right · <span class="kbd">A</span>/<span class="kbd">D</span> or arrows</div>
+        <div><b>Jump</b>Tap the screen · <span class="kbd">Space</span>. Hold for a longer hop.</div>
+        <div><b>Stuck?</b>Checkpoint button · <span class="kbd">R</span> rewinds you to the last gate</div>
+        <div><b>Upgrade</b>Every gate offers one of three parts. Pick what the next stretch needs.</div>
+      </div>
+      <div class="row">
+        <label class="toggle"><input type="checkbox" id="opt-quality"> High quality</label>
+        <label class="toggle"><input type="checkbox" id="opt-sound" checked> Sound</label>
+        <span class="spacer"></span>
+        <span id="menu-note" style="font-size:12px;color:var(--paper-dim)"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Upgrade pick -->
+  <div id="screen-upgrade" class="screen" hidden>
+    <div class="card">
+      <div>
+        <div class="eyebrow" id="up-eyebrow">Gate 1 of 5</div>
+        <h2>Bolt on a part</h2>
+      </div>
+      <div class="picks" id="picks"></div>
+      <p style="font-size:12.5px">Checkpoint saved. If you run out of momentum later, rewind here and take another run at it.</p>
+    </div>
+  </div>
+
+  <!-- Pause -->
+  <div id="screen-pause" class="screen" hidden>
+    <div class="card">
+      <div><div class="eyebrow">Paused</div><h2>Catch your breath</h2></div>
+      <div class="row">
+        <button class="btn primary" id="btn-resume">Resume</button>
+        <button class="btn" id="btn-restart-cp">Back to checkpoint</button>
+        <button class="btn" id="btn-quit">Quit to menu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Level complete -->
+  <div id="screen-complete" class="screen" hidden>
+    <div class="card">
+      <div><div class="eyebrow" id="done-eyebrow">Level clear</div><h2 id="done-title">You made it</h2></div>
+      <p id="done-text"></p>
+      <div class="stats">
+        <div><b id="done-time">0:00</b><span>time</span></div>
+        <div><b id="done-speed">0</b><span>top speed</span></div>
+        <div><b id="done-bolts">0</b><span>bolts</span></div>
+      </div>
+      <div class="row">
+        <button class="btn primary" id="btn-next">Next level</button>
+        <button class="btn" id="btn-again">Run it again</button>
+        <button class="btn" id="btn-menu">Menu</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+<script type="module" src="src/main.js"></script>
