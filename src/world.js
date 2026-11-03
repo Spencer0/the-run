@@ -19,6 +19,19 @@ function blockGeometry(b, tile, color) {
 }
 
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _e = new THREE.Euler();
+const UP = new THREE.Vector3(0, 1, 0), _a = new THREE.Vector3(), _b = new THREE.Vector3(), _d = new THREE.Vector3();
+const clamp01 = (t) => Math.max(0, Math.min(1, t));
+export function railX(r, s) { return r.x0 + (r.x1 - r.x0) * clamp01((s - r.s0) / (r.s1 - r.s0)); }
+export function railY(r, s) { return r.y0 + (r.y1 - r.y0) * clamp01((s - r.s0) / (r.s1 - r.s0)); }
+export function zipY(z, s) { return z.y0 + (z.y1 - z.y0) * clamp01((s - z.s0) / (z.s1 - z.s0)); }
+// Unit cylinder along +Y (0..1) stretched between two world points.
+function bar(radius, mat, ax, ay, az, bx, by, bz, segs = 8) {
+  const g = new THREE.CylinderGeometry(radius, radius, 1, segs); g.translate(0, 0.5, 0);
+  const m = new THREE.Mesh(g, mat);
+  _a.set(ax, ay, az); _b.set(bx, by, bz); _d.subVectors(_b, _a); const l = _d.length(); _d.normalize();
+  m.position.copy(_a); m.scale.set(1, l, 1); m.quaternion.setFromUnitVectors(UP, _d);
+  return m;
+}
 
 export class World {
   constructor(L, theme, scene, r, q) {
@@ -35,6 +48,17 @@ export class World {
       (byKind[kind] ||= []).push(blockGeometry(b, M.tile, col));
     }
     for (const k in byKind) { const m = merged(byKind[k], M[k]); m.receiveShadow = true; this.group.add(m); }
+    // floating platforms get support columns down to whatever is below
+    const sup = [];
+    for (const b of L.blocks) {
+      if (b.kind === 'bridge' || b.bottom <= L.baseY - 7) continue;
+      for (let s = b.s0 + 4; s < b.s1 - 2; s += 12) for (const x of [b.x0 + 0.8, b.x1 - 0.8]) {
+        const f = L.floorAt(x, s, b.bottom - 0.1); const yb = f ? f.y : L.baseY - 9;
+        sup.push(placeBox(0.9, b.bottom - yb, 0.9, x, (b.bottom + yb) / 2, -s, 0x3a3f45));
+        sup.push(placeBox(1.6, 0.4, 1.6, x, b.bottom - 0.2, -s, 0x2a2f36));
+      }
+    }
+    if (sup.length) this.group.add(merged(sup, new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0.6, vertexColors: true })));
 
     // ---- hazards ----
     this.spikesMesh = this.buildSpikes(L.hazards.filter((h) => h.type === 'spikes'));
@@ -43,6 +67,11 @@ export class World {
     this.drones = this.buildDrones(L.hazards.filter((h) => h.type === 'drone'));
     this.boosts = this.buildBoosts(L.boosts);
     this.bolts = this.buildBolts(L.bolts);
+    this.pillarsMesh = this.buildPillars(L.hazards.filter((h) => h.type === 'pillar'));
+    this.buildRails(L.rails);
+    this.buildZips(L.zips);
+    this.pads = this.buildPads(L.pads);
+    this.rings = this.buildRings(L.rings);
     this.gates = this.buildGates(L.checkpoints, L.finishS, L);
     this.t = 0;
   }
@@ -135,6 +164,87 @@ export class World {
     return list;
   }
 
+  buildPillars(list) {
+    const geos = [];
+    for (const h of list) {
+      const g = new THREE.BoxGeometry(h.x1 - h.x0, h.h, h.s1 - h.s0); g.translate((h.x0 + h.x1) / 2, h.y + h.h / 2, -(h.s0 + h.s1) / 2); geos.push(g);
+      const cap = new THREE.BoxGeometry(h.x1 - h.x0 + 0.4, 0.3, h.s1 - h.s0 + 0.4); cap.translate((h.x0 + h.x1) / 2, h.y + h.h + 0.15, -(h.s0 + h.s1) / 2); geos.push(cap);
+    }
+    if (!geos.length) return null;
+    const m = new THREE.Mesh(mergeGeometries(geos, false), this.M.pillar || this.M.gate); m.castShadow = true; this.group.add(m); return m;
+  }
+
+  buildRails(list) {
+    const accent = new THREE.Color(this.theme.accent);
+    this.railMat = new THREE.MeshStandardMaterial({ color: 0xd8dde2, emissive: accent, emissiveIntensity: this.theme.id === 'cyber' ? 1.2 : 0.25, roughness: 0.3, metalness: 0.9 });
+    const supMat = new THREE.MeshStandardMaterial({ color: 0x2a2f36, roughness: 0.6, metalness: 0.7 });
+    const sup = [];
+    for (const r of list) {
+      const m = bar(0.16, this.railMat, r.x0, r.y0, -r.s0, r.x1, r.y1, -r.s1); m.castShadow = true; this.group.add(m);
+      const m2 = bar(0.07, this.railMat, r.x0 - 0.35, r.y0 - 0.25, -r.s0, r.x1 - 0.35, r.y1 - 0.25, -r.s1, 6); this.group.add(m2);
+      const m3 = bar(0.07, this.railMat, r.x0 + 0.35, r.y0 - 0.25, -r.s0, r.x1 + 0.35, r.y1 - 0.25, -r.s1, 6); this.group.add(m3);
+      for (let s = r.s0 + 3; s < r.s1; s += 7) {
+        const x = railX(r, s), y = railY(r, s);
+        const f = this.L.floorAt(x, s, y - 0.5); const yb = f ? f.y : y - 7;
+        sup.push(placeBox(0.22, Math.max(0.5, y - yb), 0.22, x, (y + yb) / 2 - 0.1, -s, 0x2a2f36));
+      }
+    }
+    if (sup.length) this.group.add(merged(sup, supMat));
+  }
+
+  buildZips(list) {
+    const cableMat = new THREE.MeshStandardMaterial({ color: 0x8a94a0, roughness: 0.4, metalness: 0.9 });
+    const pylonMat = new THREE.MeshStandardMaterial({ color: 0x3a3f45, roughness: 0.6, metalness: 0.6 });
+    const trolleyMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: new THREE.Color(this.theme.accent), emissiveIntensity: 1.2, roughness: 0.3, metalness: 0.8 });
+    const pyl = [];
+    for (const z of list) {
+      this.group.add(bar(0.1, cableMat, z.x0, z.y0, -z.s0, z.x1, z.y1, -z.s1, 6));
+      for (const [x, y, s] of [[z.x0, z.y0, z.s0], [z.x1, z.y1, z.s1]]) {
+        const f = this.L.floorAt(x, s, y - 0.5); const yb = f ? f.y : y - 9;
+        pyl.push(placeBox(0.5, y - yb + 1, 0.5, x, (y + yb + 1) / 2, -s, 0x3a3f45));
+        pyl.push(placeBox(2.4, 0.3, 0.5, x, y + 0.9, -s, 0xe8c547));
+      }
+      const tr = new THREE.Group();
+      const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.08, 6, 14), trolleyMat); wheel.rotation.y = Math.PI / 2; wheel.position.y = 0.2; tr.add(wheel);
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.7), trolleyMat); body.position.y = -0.35; tr.add(body);
+      const handle = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.12, 0.12), trolleyMat); handle.position.y = -0.95; tr.add(handle);
+      for (const sx of [-1, 1]) { const st = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.5, 0.08), trolleyMat); st.position.set(sx * 0.6, -0.72, 0); tr.add(st); }
+      tr.position.set(z.x0, z.y0, -z.s0); this.group.add(tr); z.trolley = tr;
+    }
+    if (pyl.length) this.group.add(merged(pyl, pylonMat));
+  }
+  moveTrolley(z, s) { const t = clamp01((s - z.s0) / (z.s1 - z.s0)); z.trolley.position.set(z.x0 + (z.x1 - z.x0) * t, zipY(z, s) + 0.15, -s); }
+  parkTrolley(z) { z.parkT = 1.5; }
+
+  buildPads(list) {
+    const accent = new THREE.Color(this.theme.accent);
+    const base = new THREE.MeshStandardMaterial({ color: 0x1b1f26, roughness: 0.5, metalness: 0.7 });
+    const topMat = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: accent, emissiveIntensity: 0.9, roughness: 0.3 });
+    const out = [];
+    for (const pad of list) {
+      const g = new THREE.Group();
+      const b = new THREE.Mesh(new THREE.CylinderGeometry(1.9, 2.1, 0.5, 24), base); b.position.y = 0.25; g.add(b);
+      const t = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.6, 0.3, 24), topMat); t.position.y = 0.6; g.add(t);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(1.7, 0.08, 6, 32), topMat); ring.rotation.x = Math.PI / 2; ring.position.y = 0.52; g.add(ring);
+      for (let k = 0; k < 4; k++) { const spring = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.35, 6), base); spring.position.set(Math.cos(k * 1.57) * 1.0, 0.45, Math.sin(k * 1.57) * 1.0); g.add(spring); }
+      g.position.set(pad.x, pad.y, -pad.s); this.group.add(g); pad.group = g; pad.top = t; pad.anim = 0; out.push(pad);
+    }
+    return out;
+  }
+
+  buildRings(list) {
+    const accent = new THREE.Color(this.theme.accent);
+    this.ringMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: accent, emissiveIntensity: 1.6, roughness: 0.3, metalness: 0.5 });
+    const out = [];
+    const geo = new THREE.TorusGeometry(2.3, 0.2, 10, 40);
+    for (const ring of list) {
+      const m = new THREE.Mesh(geo, this.ringMat.clone()); m.position.set(ring.x, ring.y, -ring.s); this.group.add(m);
+      const inner = new THREE.Mesh(new THREE.TorusGeometry(1.4, 0.06, 6, 28), m.material); m.add(inner);
+      ring.mesh = m; ring.flash = 0; out.push(ring);
+    }
+    return out;
+  }
+
   buildGates(cps, finishS, L) {
     const out = [];
     const accent = new THREE.Color(this.theme.accent);
@@ -199,6 +309,18 @@ export class World {
         _m.compose(_p, _q, _s); bm.setMatrixAt(b.i, _m); dirty = true;
       }
       if (dirty) bm.instanceMatrix.needsUpdate = true;
+    }
+    for (const pad of this.pads) {
+      if (pad.anim > 0) { pad.anim = Math.max(0, pad.anim - dt * 3); const sq = Math.sin(pad.anim * Math.PI); pad.group.scale.set(1 + sq * 0.25, 1 - sq * 0.5, 1 + sq * 0.25); }
+      if (Math.abs(-pad.s - camZ) < 160) pad.top.material.emissiveIntensity = 0.8 + Math.sin(t * 5 + pad.s) * 0.4;
+    }
+    for (const ring of this.rings) {
+      if (Math.abs(-ring.s - camZ) > 220) continue;
+      ring.mesh.rotation.z = t * 1.2 + ring.s; ring.mesh.rotation.y = Math.sin(t * 0.8 + ring.s) * 0.25;
+      if (ring.flash > 0) { ring.flash = Math.max(0, ring.flash - dt * 3); const f = Math.sin(ring.flash * Math.PI); ring.mesh.scale.setScalar(1 + f * 0.5); ring.mesh.material.emissiveIntensity = 1.6 + f * 4; }
+    }
+    for (const z of this.L.zips) {
+      if (z.parkT > 0) { z.parkT -= dt; if (z.parkT <= 0) z.trolley.position.set(z.x0, z.y0 + 0.15, -z.s0); }
     }
     // boost chevrons scroll
     if (this.boostTex) this.boostTex.offset.y = -t * 1.5;

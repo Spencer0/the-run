@@ -184,6 +184,7 @@ const tropic = {
       side: new THREE.MeshStandardMaterial({ map: dirt, roughness: 1, vertexColors: true }),
       spike: new THREE.MeshStandardMaterial({ color: 0xc9c2b0, roughness: 0.5, metalness: 0.4 }),
       hurdle: new THREE.MeshStandardMaterial({ map: haz, roughness: 0.8 }),
+      pillar: new THREE.MeshStandardMaterial({ map: stone, color: 0xb0a890, roughness: 0.9 }),
       gate: new THREE.MeshStandardMaterial({ color: 0x5a5244, roughness: 0.8, metalness: 0.2 }),
       tile: 6,
     };
@@ -196,7 +197,8 @@ const tropic = {
     for (let side = -1; side <= 1; side += 2) {
       for (let s = -40; s < len; s += 9) {
         const h = 6 + r.range(0, 7), w = 5 + r.range(0, 3);
-        const x = side * (W + 2.6 + r.range(0, 1.5));
+        const ext = L.extentAt(s + 4.5);
+        const x = side * (ext + 2.6 + r.range(0, 1.5));
         cliffs.push(placeBox(w, h + 14, 9.6, x, h / 2 - 7, -(s + 4.5), new THREE.Color().setHSL(0.22 + r.range(0, 0.1), 0.35, 0.5 + r.range(0, 0.2)), r.range(-0.08, 0.08), 7));
         if (r.chance(0.6)) cliffs.push(placeBox(w + 4, h + 10 + r.range(0, 8), 10, x + side * 6, h / 2 + 2, -(s + 4.5), new THREE.Color().setHSL(0.26, 0.3, 0.42 + r.range(0, 0.15)), 0, 7));
         if (r.chance(0.5)) cliffs.push(placeBox(2.5 + r.range(0, 2), 2 + r.range(0, 2), 3 + r.range(0, 3), x - side * (w / 2 - 0.5), h + 0.5, -(s + r.range(0, 8)), new THREE.Color().setHSL(0.3, 0.45, 0.4 + r.range(0, 0.15)), r.range(0, 1), 3));
@@ -208,7 +210,7 @@ const tropic = {
     const trunks = [], crowns = [];
     for (let side = -1; side <= 1; side += 2) {
       for (let s = -40; s < len; s += 7 + r.range(0, 5)) {
-        const x = side * (W + 4 + r.range(0, 12)), h = 7 + r.range(0, 6), lean = r.range(-0.2, 0.2);
+        const x = side * (L.extentAt(s) + 4 + r.range(0, 12)), h = 7 + r.range(0, 6), lean = r.range(-0.2, 0.2);
         const base = 5 + r.range(0, 5);
         trunks.push({ x, y: base, z: -s, rz: lean * -side, rx: r.range(-0.1, 0.1), sx: 1, sy: h / 9, sz: 1, color: new THREE.Color().setHSL(0.08, 0.3, 0.3 + r.range(0, 0.1)) });
         crowns.push({ x: x + Math.sin(lean) * h * side * -1, y: base + h, z: -s, ry: r.range(0, 6.3), s: 0.8 + r.range(0, 0.5) });
@@ -221,8 +223,9 @@ const tropic = {
     // ferns + rocks near the edges
     const ferns = [], rocks = [];
     for (let s = 0; s < len; s += 3) {
-      if (r.chance(0.6)) ferns.push({ x: r.sign() * (W + 0.8 + r.range(0, 1.2)), y: 0.1, z: -s, ry: r.range(0, 6.3), s: 0.8 + r.range(0, 0.8), color: new THREE.Color().setHSL(0.32, 0.5, 0.25 + r.range(0, 0.12)) });
-      if (r.chance(0.25)) rocks.push({ x: r.sign() * (W + 1 + r.range(0, 3)), y: 0.2, z: -s, ry: r.range(0, 6.3), sx: 0.8 + r.range(0, 1.5), sy: 0.5 + r.range(0, 0.9), sz: 0.8 + r.range(0, 1.5), color: new THREE.Color().setHSL(0.25, 0.1, 0.3 + r.range(0, 0.1)) });
+      const ext = L.extentAt(s);
+      if (r.chance(0.6)) ferns.push({ x: r.sign() * (ext + 0.8 + r.range(0, 1.2)), y: 0.1, z: -s, ry: r.range(0, 6.3), s: 0.8 + r.range(0, 0.8), color: new THREE.Color().setHSL(0.32, 0.5, 0.25 + r.range(0, 0.12)) });
+      if (r.chance(0.25)) rocks.push({ x: r.sign() * (ext + 1 + r.range(0, 3)), y: 0.2, z: -s, ry: r.range(0, 6.3), sx: 0.8 + r.range(0, 1.5), sy: 0.5 + r.range(0, 0.9), sz: 0.8 + r.range(0, 1.5), color: new THREE.Color().setHSL(0.25, 0.1, 0.3 + r.range(0, 0.1)) });
     }
     const fernGeo = (() => { const a = new THREE.PlaneGeometry(2.2, 1.6); a.translate(0, 0.8, 0); const b = a.clone(); b.rotateY(Math.PI / 2); const c = a.clone(); c.rotateY(Math.PI / 4); const d = a.clone(); d.rotateY(-Math.PI / 4); return mergeGeometries([a, b, c, d]); })();
     group.add(instanced(fernGeo, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, side: THREE.DoubleSide }), ferns));
@@ -232,11 +235,13 @@ const tropic = {
     const pillars = [], lamps = [];
     for (let s = 10; s < L.length; s += 10) {
       for (let side = -1; side <= 1; side += 2) {
-        const f = L.floorAt(side * (W - 0.3), s, 50);
-        const y = f ? f.y : 0;
-        pillars.push(placeBox(0.7, 3.2, 0.7, side * (W - 0.4), y + 1.6, -s, 0x6b6250));
-        pillars.push(placeBox(1, 0.3, 1, side * (W - 0.4), y + 3.3, -s, 0x50483a));
-        lamps.push({ x: side * (W - 0.4), y: y + 3.75, z: -s, s: 0.28 });
+        const ex = L.extentAt(s) - 0.4;
+        const f = L.floorAt(side * ex, s, 50);
+        if (!f) continue;
+        const y = f.y;
+        pillars.push(placeBox(0.7, 3.2, 0.7, side * ex, y + 1.6, -s, 0x6b6250));
+        pillars.push(placeBox(1, 0.3, 1, side * ex, y + 3.3, -s, 0x50483a));
+        lamps.push({ x: side * ex, y: y + 3.75, z: -s, s: 0.28 });
       }
     }
     group.add(merged(pillars, new THREE.MeshStandardMaterial({ roughness: 0.9, vertexColors: true })));
@@ -253,14 +258,15 @@ const tropic = {
     // water in the ravines
     const water = waterMaterial(0x0f3a3a, 0x2f8f80, 0xcfe9e0, 0.92);
     const pitGeos = [];
-    for (const p of L.pits) { const g = new THREE.PlaneGeometry(W * 2 + 6, p.s1 - p.s0 + 10, 4, 12); g.rotateX(-Math.PI / 2); g.translate(0, -9, -(p.s0 + p.s1) / 2); pitGeos.push(g); }
+    for (const p of L.pits) { const ex = L.extentAt((p.s0 + p.s1) / 2); const g = new THREE.PlaneGeometry(ex * 2 + 6, p.s1 - p.s0 + 10, 4, 12); g.rotateX(-Math.PI / 2); g.translate(0, -9, -(p.s0 + p.s1) / 2); pitGeos.push(g); }
     if (pitGeos.length) { const wm = new THREE.Mesh(mergeGeometries(pitGeos), water); wm.frustumCulled = false; group.add(wm); }
     // ravine walls + submerged rocks
     const rav = [];
     for (const p of L.pits) {
-      for (let side = -1; side <= 1; side += 2) rav.push(placeBox(2, 12, p.s1 - p.s0 + 2, side * (W + 1), -6, -(p.s0 + p.s1) / 2, 0x5a5445));
-      rav.push(placeBox(W * 2 + 2, 1, 1.6, 0, -0.8, -p.s0 + 0.6, 0x45402f));
-      rav.push(placeBox(W * 2 + 2, 1, 1.6, 0, -0.8, -p.s1 - 0.6, 0x45402f));
+      const ex = L.extentAt((p.s0 + p.s1) / 2);
+      for (let side = -1; side <= 1; side += 2) rav.push(placeBox(2, 12, p.s1 - p.s0 + 2, side * (ex + 1), -6, -(p.s0 + p.s1) / 2, 0x5a5445, 0, 6));
+      rav.push(placeBox(ex * 2 + 2, 1, 1.6, 0, -0.8, -p.s0 + 0.6, 0x45402f));
+      rav.push(placeBox(ex * 2 + 2, 1, 1.6, 0, -0.8, -p.s1 - 0.6, 0x45402f));
     }
     if (rav.length) group.add(merged(rav, new THREE.MeshStandardMaterial({ roughness: 1, vertexColors: true })));
 
@@ -304,6 +310,7 @@ const cyber = {
       side: new THREE.MeshStandardMaterial({ color: 0x141a33, roughness: 0.6, metalness: 0.5, vertexColors: true }),
       spike: new THREE.MeshStandardMaterial({ color: 0xff3fd1, emissive: 0xff3fd1, emissiveIntensity: 1.2, roughness: 0.3 }),
       hurdle: new THREE.MeshStandardMaterial({ color: 0x2a1f55, emissive: 0xff3fd1, emissiveIntensity: 0.5, roughness: 0.4, metalness: 0.6 }),
+      pillar: new THREE.MeshStandardMaterial({ map: gridM, emissiveMap: gridME, emissive: 0xffffff, emissiveIntensity: 0.8, roughness: 0.35, metalness: 0.6 }),
       gate: new THREE.MeshStandardMaterial({ color: 0x1b2242, roughness: 0.4, metalness: 0.8 }),
       tile: 8,
     };
@@ -323,21 +330,25 @@ const cyber = {
     for (let side = -1; side <= 1; side += 2) {
       for (let s = -60; s < len; s += 10 + r.range(0, 8)) {
         const h = 20 + r.range(0, 90), w = 6 + r.range(0, 10);
-        towers.push({ x: side * (W + 8 + r.range(0, 70)), y: h / 2 - 28, z: -s, sx: w, sy: h, sz: w, color: new THREE.Color().setHSL(0.62 + r.range(0, 0.2), 0.5, 0.25 + r.range(0, 0.2)) });
+        towers.push({ x: side * (L.extentAt(s) + 8 + r.range(0, 70)), y: h / 2 - 28, z: -s, sx: w, sy: h, sz: w, color: new THREE.Color().setHSL(0.62 + r.range(0, 0.2), 0.5, 0.25 + r.range(0, 0.2)) });
       }
     }
     group.add(instanced(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ map: win, emissiveMap: winE, emissive: 0xffffff, emissiveIntensity: 1.4, roughness: 0.5, metalness: 0.6 }), towers));
 
     // neon rails along the corridor + pylons every 8 units
     const rails = [];
-    rails.push(placeBox(0.22, 0.22, len + 100, W + 0.6, 0.5, -len / 2 + 30, 0x37e8ff));
-    rails.push(placeBox(0.22, 0.22, len + 100, -(W + 0.6), 0.5, -len / 2 + 30, 0xff3fd1));
+    for (let s = -40; s < len; s += 4) for (let side = -1; side <= 1; side += 2) {
+      const e0 = L.extentAt(s), e1 = L.extentAt(s + 4);
+      const g = new THREE.BoxGeometry(0.22, 0.22, Math.hypot(4, e1 - e0) + 0.3); g.rotateY(Math.atan2((e1 - e0) * side, 4));
+      g.translate(side * ((e0 + e1) / 2 + 0.6), 0.5, -(s + 2)); rails.push(colorGeo(g, side > 0 ? 0x37e8ff : 0xff3fd1));
+    }
     const pylons = [], pylonTops = [];
     for (let s = 8; s < L.length; s += 8) {
       for (let side = -1; side <= 1; side += 2) {
-        const f = L.floorAt(side * (W - 0.3), s, 50); const y = f ? f.y : 0;
-        pylons.push(placeBox(0.3, 3.6, 0.3, side * (W + 0.6), y + 1.8, -s, 0x1b2242));
-        pylonTops.push({ x: side * (W + 0.6), y: y + 3.8, z: -s, sx: 0.6, sy: 0.25, sz: 0.6, color: side > 0 ? 0x37e8ff : 0xff3fd1 });
+        const ex = L.extentAt(s);
+        const f = L.floorAt(side * (ex - 0.3), s, 50); if (!f) continue; const y = f.y;
+        pylons.push(placeBox(0.3, 3.6, 0.3, side * (ex + 0.6), y + 1.8, -s, 0x1b2242));
+        pylonTops.push({ x: side * (ex + 0.6), y: y + 3.8, z: -s, sx: 0.6, sy: 0.25, sz: 0.6, color: side > 0 ? 0x37e8ff : 0xff3fd1 });
       }
     }
     group.add(merged(rails, new THREE.MeshStandardMaterial({ emissive: 0xffffff, emissiveIntensity: 1.6, vertexColors: true, roughness: 0.3 })));
@@ -357,7 +368,7 @@ const cyber = {
 
     // floating shapes
     const shapes = [];
-    for (let i = 0; i < (q.high ? 48 : 26); i++) shapes.push({ x: r.range(-W - 14, W + 14), y: 6 + r.range(0, 16), z: -r.range(0, L.length), s: 0.8 + r.range(0, 1.6), color: r.chance(0.5) ? 0x37e8ff : 0xff3fd1, spin: r.range(0.3, 1.2) });
+    for (let i = 0; i < (q.high ? 48 : 26); i++) shapes.push({ x: r.range(-W - 24, W + 24), y: 6 + r.range(0, 16), z: -r.range(0, L.length), s: 0.8 + r.range(0, 1.6), color: r.chance(0.5) ? 0x37e8ff : 0xff3fd1, spin: r.range(0.3, 1.2) });
     const shapeMesh = instanced(new THREE.OctahedronGeometry(1, 0), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.9, roughness: 0.2, metalness: 0.8, flatShading: true }), shapes);
     group.add(shapeMesh);
 
@@ -404,6 +415,7 @@ const cargo = {
       side: new THREE.MeshStandardMaterial({ map: cont, roughness: 0.7, metalness: 0.3, vertexColors: true }),
       spike: new THREE.MeshStandardMaterial({ color: 0xd8d8d8, roughness: 0.4, metalness: 0.7 }),
       hurdle: new THREE.MeshStandardMaterial({ map: haz, roughness: 0.7 }),
+      pillar: new THREE.MeshStandardMaterial({ map: cont, color: 0xb5432b, roughness: 0.7, metalness: 0.3 }),
       gate: new THREE.MeshStandardMaterial({ color: 0x2b4a7a, roughness: 0.6, metalness: 0.4 }),
       tile: 5,
     };
@@ -418,9 +430,9 @@ const cargo = {
     // hull sides
     const hull = [];
     for (let side = -1; side <= 1; side += 2) {
-      hull.push(placeBox(3, 16, len + 120, side * (W + 17), -6.5, -len / 2 + 40, 0x1e2630));
-      hull.push(placeBox(3.2, 1.2, len + 120, side * (W + 17), -11, -len / 2 + 40, 0x8a2a1e));
-      hull.push(placeBox(2, 0.6, len + 120, side * (W + 16.2), 1.6, -len / 2 + 40, 0xd9dde0));
+      hull.push(placeBox(3, 16, len + 120, side * 42, -6.5, -len / 2 + 40, 0x1e2630));
+      hull.push(placeBox(3.2, 1.2, len + 120, side * 42, -11, -len / 2 + 40, 0x8a2a1e));
+      hull.push(placeBox(2, 0.6, len + 120, side * 41.2, 1.6, -len / 2 + 40, 0xd9dde0));
     }
     group.add(merged(hull, new THREE.MeshStandardMaterial({ roughness: 0.7, metalness: 0.4, vertexColors: true })));
 
@@ -429,29 +441,31 @@ const cargo = {
     const boxes = [];
     for (let side = -1; side <= 1; side += 2) {
       for (let s = -60; s < len; s += 6.3) {
+        const ext = Math.max(L.extentAt(s), L.extentAt(s + 6));
         for (let row = 0; row < 2; row++) {
           const stack = r.int(1, 4);
           if (r.chance(0.08)) continue;
-          for (let k = 0; k < stack; k++) boxes.push({ x: side * (W + 2.2 + row * 2.6 + r.range(-0.05, 0.05)), y: 1.3 + k * 2.6, z: -(s + 3), color: r.pick(palette), sx: 2.45, sy: 2.6, sz: 6.1 });
+          for (let k = 0; k < stack; k++) boxes.push({ x: side * (ext + 2.2 + row * 2.6 + r.range(-0.05, 0.05)), y: 1.3 + k * 2.6, z: -(s + 3), color: r.pick(palette), sx: 2.45, sy: 2.6, sz: 6.1 });
         }
-        if (r.chance(0.5)) { const stack = r.int(2, 5); for (let k = 0; k < stack; k++) boxes.push({ x: side * (W + 9 + r.range(0, 5)), y: 1.3 + k * 2.6, z: -(s + 3), color: r.pick(palette), sx: 2.45, sy: 2.6, sz: 6.1 }); }
+        for (let col = 0; col < 3; col++) if (r.chance(0.6)) { const stack = r.int(2, 5); const x = side * (ext + 9 + col * 2.7 + r.range(0, 1)); if (x * side > 39) continue; for (let k = 0; k < stack; k++) boxes.push({ x, y: 1.3 + k * 2.6, z: -(s + 3), color: r.pick(palette), sx: 2.45, sy: 2.6, sz: 6.1 }); }
       }
     }
     group.add(instanced(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ map: T.texContainer(), roughness: 0.75, metalness: 0.3 }), boxes));
 
     // rails + bollards + deck lamps along the corridor
     const rails = [], posts = [], lamps = [];
-    for (let side = -1; side <= 1; side += 2) {
-      rails.push(placeBox(0.12, 0.12, len + 60, side * (W + 0.7), 1.25, -len / 2 + 20, 0xe8c547));
-      rails.push(placeBox(0.12, 0.12, len + 60, side * (W + 0.7), 0.7, -len / 2 + 20, 0xe8c547));
+    for (let s = -30; s < len; s += 4) for (let side = -1; side <= 1; side += 2) {
+      const e0 = L.extentAt(s), e1 = L.extentAt(s + 4);
+      for (const h of [1.25, 0.7]) { const g = new THREE.BoxGeometry(0.12, 0.12, Math.hypot(4, e1 - e0) + 0.2); g.rotateY(Math.atan2((e1 - e0) * side, 4)); g.translate(side * ((e0 + e1) / 2 + 0.7), h, -(s + 2)); rails.push(colorGeo(g, 0xe8c547)); }
     }
-    for (let s = 2; s < L.length; s += 2) for (let side = -1; side <= 1; side += 2) posts.push({ x: side * (W + 0.7), y: 0.65, z: -s, sx: 0.08, sy: 1.3, sz: 0.08, color: 0xd9dde0 });
+    for (let s = 2; s < L.length; s += 2) for (let side = -1; side <= 1; side += 2) posts.push({ x: side * (L.extentAt(s) + 0.7), y: 0.65, z: -s, sx: 0.08, sy: 1.3, sz: 0.08, color: 0xd9dde0 });
     for (let s = 10; s < L.length; s += 10) for (let side = -1; side <= 1; side += 2) {
-      const f = L.floorAt(side * (W - 0.3), s, 50); const y = f ? f.y : 0;
-      rails.push(placeBox(0.25, 4.5, 0.25, side * (W - 0.5), y + 2.25, -s, 0x3a3f45));
-      rails.push(placeBox(1.6, 0.2, 0.3, side * (W - 1.1), y + 4.5, -s, 0x3a3f45));
-      lamps.push({ x: side * (W - 1.7), y: y + 4.35, z: -s, sx: 0.5, sy: 0.18, sz: 0.5 });
-      if (s % 30 === 0) rails.push(placeBox(0.7, 1.0, 0.7, side * (W - 0.9), y + 0.5, -s - 4, 0xe8c547));
+      const ex = L.extentAt(s);
+      const f = L.floorAt(side * (ex - 0.3), s, 50); if (!f) continue; const y = f.y;
+      rails.push(placeBox(0.25, 4.5, 0.25, side * (ex - 0.5), y + 2.25, -s, 0x3a3f45));
+      rails.push(placeBox(1.6, 0.2, 0.3, side * (ex - 1.1), y + 4.5, -s, 0x3a3f45));
+      lamps.push({ x: side * (ex - 1.7), y: y + 4.35, z: -s, sx: 0.5, sy: 0.18, sz: 0.5 });
+      if (s % 30 === 0) rails.push(placeBox(0.7, 1.0, 0.7, side * (ex - 0.9), y + 0.5, -s - 4, 0xe8c547));
     }
     group.add(merged(rails, new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0.5, vertexColors: true })));
     group.add(instanced(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 }), posts));
@@ -460,8 +474,8 @@ const cargo = {
     // gantry cranes
     const cranes = [];
     for (let s = 140; s < L.length; s += 330) {
-      for (let side = -1; side <= 1; side += 2) cranes.push(placeBox(3, 36, 3, side * (W + 18.5), 18, -s, 0x2b4a7a));
-      cranes.push(placeBox(2 * (W + 21), 3, 4, 0, 36, -s, 0xe8c547));
+      for (let side = -1; side <= 1; side += 2) cranes.push(placeBox(3, 36, 3, side * 44, 18, -s, 0x2b4a7a));
+      cranes.push(placeBox(2 * 46, 3, 4, 0, 36, -s, 0xe8c547));
       cranes.push(placeBox(6, 4, 5, r.range(-W, W), 33, -s, 0x3a3f45));
       cranes.push(placeBox(0.3, 20, 0.3, r.range(-W, W), 23, -s, 0x1e2630));
     }
@@ -480,12 +494,13 @@ const cargo = {
     // open holds under the pits
     const holds = [];
     for (const p of L.pits) {
-      holds.push(placeBox(W * 2 + 2, 1, p.s1 - p.s0 + 2, 0, -7.5, -(p.s0 + p.s1) / 2, 0x11151a));
-      for (let side = -1; side <= 1; side += 2) holds.push(placeBox(1, 8, p.s1 - p.s0 + 2, side * (W + 1), -3.5, -(p.s0 + p.s1) / 2, 0x1c2229));
-      for (let s = p.s0 + 2; s < p.s1 - 4; s += 6.4) for (let k = 0; k < 2; k++) if (r.chance(0.7)) holds.push(placeBox(2.4, 2.6, 6.1, r.range(-W + 2, W - 2), -5.7 + k * 2.6, -(s + 3), r.pick(palette), 0, 2.5));
-      for (let s = p.s0 + 3; s < p.s1; s += 8) for (let side = -1; side <= 1; side += 2) holds.push(placeBox(0.5, 0.3, 0.5, side * (W - 0.6), -3, -s, 0xffb060));
-      holds.push(placeBox(W * 2 + 2, 0.5, 0.6, 0, -0.25, -p.s0 + 0.3, 0xe8c547));
-      holds.push(placeBox(W * 2 + 2, 0.5, 0.6, 0, -0.25, -p.s1 - 0.3, 0xe8c547));
+      const ex = L.extentAt((p.s0 + p.s1) / 2);
+      holds.push(placeBox(ex * 2 + 2, 1, p.s1 - p.s0 + 2, 0, -7.5, -(p.s0 + p.s1) / 2, 0x11151a));
+      for (let side = -1; side <= 1; side += 2) holds.push(placeBox(1, 8, p.s1 - p.s0 + 2, side * (ex + 1), -3.5, -(p.s0 + p.s1) / 2, 0x1c2229));
+      for (let s = p.s0 + 2; s < p.s1 - 4; s += 6.4) for (let k = 0; k < 2; k++) if (r.chance(0.7)) holds.push(placeBox(2.4, 2.6, 6.1, r.range(-ex + 2, ex - 2), -5.7 + k * 2.6, -(s + 3), r.pick(palette), 0, 2.5));
+      for (let s = p.s0 + 3; s < p.s1; s += 8) for (let side = -1; side <= 1; side += 2) holds.push(placeBox(0.5, 0.3, 0.5, side * (ex - 0.6), -3, -s, 0xffb060));
+      holds.push(placeBox(ex * 2 + 2, 0.5, 0.6, 0, -0.25, -p.s0 + 0.3, 0xe8c547));
+      holds.push(placeBox(ex * 2 + 2, 0.5, 0.6, 0, -0.25, -p.s1 - 0.3, 0xe8c547));
     }
     if (holds.length) group.add(merged(holds, new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0.3, vertexColors: true })));
 

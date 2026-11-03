@@ -27,8 +27,19 @@ export class Audio {
     this.windF = c.createBiquadFilter(); this.windF.type = 'bandpass'; this.windF.frequency.value = 600; this.windF.Q.value = 0.6;
     this.windG = c.createGain(); this.windG.gain.value = 0;
     this.wind.connect(this.windF); this.windF.connect(this.windG); this.windG.connect(this.master); this.wind.start();
+    // grind buzz
+    this.grind = c.createOscillator(); this.grind.type = 'sawtooth'; this.grind.frequency.value = 95;
+    this.grindF = c.createBiquadFilter(); this.grindF.type = 'bandpass'; this.grindF.frequency.value = 1400; this.grindF.Q.value = 2;
+    this.grindG = c.createGain(); this.grindG.gain.value = 0;
+    this.grind.connect(this.grindF); this.grindF.connect(this.grindG); this.grindG.connect(this.master); this.grind.start();
+    const gs = c.createBufferSource(); gs.buffer = nb; gs.loop = true; const gf = c.createBiquadFilter(); gf.type = 'highpass'; gf.frequency.value = 3000; gs.connect(gf); gf.connect(this.grindG); gs.start();
     this.seq = null;
   }
+  setGrind(on) { if (!this.ctx) return; this.grindG.gain.setTargetAtTime(on ? 0.12 : 0, this.ctx.currentTime, 0.05); if (on) this.grind.frequency.setTargetAtTime(90 + Math.random() * 20, this.ctx.currentTime, 0.1); }
+  railOn() { this.noise(0.2, 0.3, 2500, 'highpass'); this.tone(500, 0.15, 'square', 0.1, 1.6); }
+  bounce() { this.tone(180, 0.35, 'sine', 0.4, 4.5); this.tone(90, 0.25, 'triangle', 0.3, 3); this.noise(0.2, 0.2, 900); }
+  ring() { this.tone(520, 0.4, 'triangle', 0.3, 2.2); this.tone(1040, 0.5, 'sine', 0.15, 1.5); this.noise(0.4, 0.25, 1200, 'bandpass'); }
+  zip() { this.noise(0.6, 0.3, 2000, 'bandpass'); this.tone(300, 0.6, 'sawtooth', 0.15, 2.5); }
   setEnabled(on) { this.enabled = on; if (this.master) this.master.gain.setTargetAtTime(on ? 0.8 : 0, this.ctx.currentTime, 0.05); }
   // f = speed fraction (0..1.5), g = grounded
   setMotion(f, grounded, dt) {

@@ -2,7 +2,9 @@
 
 A momentum runner. You are a tech gnome who unbolted a Halvex Robotics spider-walker (wheels on every foot) and rode it out the loading door. Build speed, keep it, and use it to clear ravines, launch off ramps and thread the recall crew's spikes, drones and laser gates.
 
-Three levels, five gates each. Every gate saves a checkpoint and offers one of three parts (top speed, acceleration, jump, air control, shield, grip, bolt magnet). The **Checkpoint** button (or `R`) rewinds you to the last gate, because losing momentum in the wrong spot can leave you stuck.
+Three levels, five gates each, and the routes branch: left or right lanes over a void, a low road with hazards under a high road with bolts, wide fields with pillars to weave through, rail runs, ziplines over long drops, bounce towers and dash-ring chains. Grind rails by landing on them, grab a zipline handle by running or jumping under it, bounce pads fire you upward, dash rings fling you forward past top speed.
+
+Every gate saves a checkpoint and offers one of three parts (top speed, acceleration, jump, air control, shield, grip, bolt magnet). The **Checkpoint** button (or `R`) rewinds you to the last gate, because losing momentum in the wrong spot can leave you stuck.
 
 | Level | Theme |
 | --- | --- |
@@ -13,7 +15,7 @@ Three levels, five gates each. Every gate saves a checkpoint and offers one of t
 ## Controls
 
 - **Steer**: drag a finger left or right, or `A`/`D` / arrow keys
-- **Jump**: tap, or `Space`. Hold for a longer arc. A second finger while steering jumps instantly.
+- **Jump**: tap, or `Space`. Hold for a longer arc. A second finger while steering jumps instantly. Jump again to hop off a rail or let go of a zipline.
 - **Rewind to checkpoint**: the on-screen button or `R`
 - **Pause**: `Esc` / `P`. **Mute**: `M`.
 
@@ -44,4 +46,4 @@ python3 -m http.server 8765
 
 ## Tuning notes
 
-Physics lives at the top of `src/main.js` (`G`) and in `resetRun()` (base acceleration, top speed, jump). Gap widths, ramp angles and hazard density scale with a `tier` value in `src/level.js` that rises per section and per level.
+Physics lives at the top of `src/main.js` (`G`) and in `resetRun()` (base acceleration, top speed, jump). Rail, zipline, pad and ring behaviour is in `step()` and `collide()` there. Gap widths, ramp angles and hazard density scale with a `tier` value in `src/level.js` that rises per section and per level; the chunk pool and its weights are in `generateLevel()`. The walkable width at each distance (`extentAt`) drives both the invisible side walls and where the scenery stands.

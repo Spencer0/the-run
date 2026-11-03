@@ -92,7 +92,7 @@ export class Mech {
   update(dt, st) {
     this.t += dt;
     const sf = Math.min(1, st.speed / Math.max(1, st.maxSpeed));
-    const grounded = st.grounded;
+    const grounded = st.grounded && !st.zip;
     this.airT = grounded ? Math.max(0, this.airT - dt * 6) : Math.min(1, this.airT + dt * 5);
     if (st.landed) this.squash = 1;
     this.squash = Math.max(0, this.squash - dt * 4);
@@ -106,7 +106,7 @@ export class Mech {
     this.bank += (targetBank - this.bank) * Math.min(1, dt * 8);
     const targetYaw = THREE.MathUtils.clamp(-st.vx * 0.02, -0.35, 0.35);
     this.yaw += (targetYaw - this.yaw) * Math.min(1, dt * 6);
-    this.root.rotation.set(grounded ? -sf * 0.08 : THREE.MathUtils.clamp(-st.vy * 0.02, -0.35, 0.3), this.yaw, this.bank);
+    this.root.rotation.set(st.zip ? 0.15 : grounded ? -sf * 0.08 : THREE.MathUtils.clamp(-st.vy * 0.02, -0.35, 0.3), this.yaw, this.bank + (st.grind ? Math.sin(this.t * 9) * 0.05 : 0));
 
     // rider
     const lean = -sf * 0.35 - (grounded ? 0 : 0.15);
@@ -124,7 +124,10 @@ export class Mech {
       const l = this.legs[k];
       const ft = this.footTargets[k], kt = this.kneeTargets[k];
       ft.copy(l.rest); kt.copy(l.kneeRest);
-      if (grounded) {
+      if (st.grind) {
+        // wheels pulled together onto the rail, like skates
+        ft.x = l.side * 0.55; ft.y = 0.36; ft.z = l.rest.z * 1.1; kt.x = l.side * 1.3; kt.y = 1.45;
+      } else if (grounded) {
         const ph = this.t * (6 + sf * 10) + l.phase;
         ft.y += Math.max(0, Math.sin(ph)) * 0.08 * (0.3 + sf);
         ft.z += Math.cos(ph) * 0.12 * sf;
